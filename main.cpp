@@ -48,6 +48,18 @@ int find(string str)
     return -1;
 }
 
+int find_fuzzy(string str)
+{
+    for(int i = 0; i < Data.size(); i++)
+    {
+        if (Data[i].find(str) != std::string::npos)//Data[i]包含str
+        {
+            cout << "找到了，索引为: " << i << endl;
+        }
+    }
+    return -1;
+}
+
 //将Data写入文件
 bool write()
 {
@@ -96,7 +108,7 @@ int main()
         switch(operation)
         {
             case -1:
-                cout << "选择操作:1.增加项, 2.删除项, 3.修改项, 4.查找项, 0.退出" << endl;
+                cout << "选择操作:1.增加项, 2.删除项, 3.修改项, 4.查找项, 5.模糊查找, 0.退出" << endl;
                 cin >> operation;
                 break;
             case 1:
@@ -129,6 +141,12 @@ int main()
                     cout << "找到了，索引为: " << idx << endl;
                 else
                     cout << "未找到" << endl;
+                operation = -1;
+                break;
+            case 5:
+                cout << "请输入要模糊查找的数据:";
+                cin >> str;
+                find_fuzzy(str);
                 operation = -1;
                 break;
             case 0:
