@@ -1,32 +1,70 @@
-基于 vector<string> 的命令行数据管理工具，支持增删改查及文件持久化。
+========================================
+  RepoManager - Command-Line Data Tool
+========================================
 
-编译运行
-g++ -o repo main.cpp -std=c++11
-./repo
-操作流程
-启动后选择：1-读取存储库，2-新建存储库
+A lightweight command-line data management tool built with 
+std::vector<string>, supporting CRUD operations and file persistence.
 
-进入主菜单进行数据操作
+【Features】
+  - CRUD operations (Create, Read, Update, Delete)
+  - Exact search and fuzzy search
+  - File persistence (auto-save/load)
+  - Multiple repository switching
+  - Interactive CLI interface
 
-退出时自动保存
+【Build & Run】
+  g++ -o repo main.cpp -std=c++11
+  ./repo
 
-主菜单选项
-增加项（连续添加，输入 exit 退出）
-删除项（按索引删除）
-修改项（按索引修改）
-查找项（返回第一个匹配项）
-模糊查找（显示所有匹配项）
-读取存储库（切换文件）
-新建存储库（清空并创建新文件）
-退出（自动保存）
-存储格式
-文件为 .txt 格式，每行：索引 数据内容
+【Workflow】
+  1. Launch: Choose operation mode
+     - 1 - Load existing repository
+     - 2 - Create new repository
+  
+  2. Main Menu: Perform data management operations
+  
+  3. Exit: Auto-save data on exit
 
-注意事项
-存储库名称不含空格，自动添加 .txt 后缀
+【Main Menu Options】
+  1 - Add items
+      Continuous addition, type "exit" to quit
+  
+  2 - Delete item
+      Delete by index
+  
+  3 - Modify item
+      Modify by index
+  
+  4 - Search item
+      Exact match, returns first result
+  
+  5 - Fuzzy search
+      Displays all items containing keyword
+  
+  6 - Load repository
+      Switch to another repository file
+  
+  7 - New repository
+      Clear data and create new file
+  
+  8 - Exit
+      Auto-save and quit
 
-索引从 0 开始
+【Storage Format】
+  - File format: .txt plain text
+  - Data structure: One record per line, format "index data_content"
+  - Example:
+    0 Apple
+    1 Banana
+    2 Orange
 
-创建已存在的存储库会询问是否覆盖
+【Usage Notes】
+  - Repository name must not contain spaces; .txt suffix added automatically
+  - Index starts from 0
+  - If repository already exists, program will prompt for overwrite
+  - Auto-save on exit - no manual save required
 
-退出时自动保存，无需手动保存
+【Tech Stack】
+  - C++11 Standard Library
+  - File streams (fstream)
+  - Standard containers (vector, string)
