@@ -2,6 +2,7 @@
 #include<fstream>
 #include<string>
 #include<vector>
+#include<windows.h>
 using namespace std;
 
 vector<string> Data;
@@ -143,6 +144,8 @@ bool createRepo()
 
 int main()
 {
+    SetConsoleOutputCP(CP_UTF8);
+    SetConsoleCP(CP_UTF8);
     int operation = -1;//控制指令
     string tmpaddcin = "";//临时存储添加项/修改项
     string str = "";//临时存储查找项
