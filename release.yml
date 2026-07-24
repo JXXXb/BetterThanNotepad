@@ -1,0 +1,48 @@
+name: Build and Release C++
+
+on:
+  push:
+    tags:
+      - 'v*'   # 推送 v1, v2, temp 等任何 v 开头的标签都会触发
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 自动生成版本号（基于提交次数）
+        id: version
+        run: |
+          $commitCount = git rev-list --count HEAD
+          $version = "v$commitCount"
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          echo "生成的版本号: $version"
+        shell: pwsh
+
+      - name: 编译 C++ 程序
+        run: |
+          g++ -o myapp.exe main.cpp logger.cpp -std=c++17 -O2
+        shell: cmd
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release ${{ steps.version.outputs.version }}
+          tag_name: ${{ steps.version.outputs.version }}
+          body: |
+            ##自动构建版本 ${{ steps.version.outputs.version }}
+            
+            **下载**：点击下方即可下载
+            
+            **更新内容**：查看下方自动生成的 commit 记录
+          generate_release_notes: true
+          files: myapp.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
