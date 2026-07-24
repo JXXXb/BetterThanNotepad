@@ -3,6 +3,9 @@
 #include<string>
 #include<vector>
 #include<windows.h>
+#include<thread>
+#include<mutex>
+#include<atomic>
 using namespace std;
 
 vector<string> Data;
@@ -63,6 +66,13 @@ int find_fuzzy(string str)
 
 string currentRepoName = "";
 
+//  看门狗/崩溃恢复系统 
+HANDLE hLoggerProcess = NULL;
+std::thread watchdogThread;
+std::atomic<bool> watchdogStop(false);
+std::mutex dataMutex;
+const string CRASH_RECOVERY_FILE = "crash_recovery.txt";
+
 bool write()
 {
     if(currentRepoName.empty())
@@ -75,7 +85,7 @@ bool write()
     }
     for(int i = 0; i < Data.size(); i++)
     {
-        out << i << " " << Data[i] << endl;
+        out << i << "@~" << Data[i] << endl;
     }
     out.close();
     return true;
@@ -91,7 +101,7 @@ bool loadRepo()
 {
     string filename;
     cout << "输入要读取的存储库名：";
-    cin >> filename;
+    getline(cin, filename);
     ifstream in(filename + ".txt");
     if(!in.is_open())
         return false;
@@ -104,7 +114,7 @@ bool loadRepo()
     {
         if(line.empty())
             continue;
-        size_t pos = line.find(' ');
+        size_t pos = line.find("@~");
         string value;
         if(pos != string::npos)
             value = line.substr(pos + 1);
@@ -122,7 +132,7 @@ bool createRepo()
     while(true)
     {
         cout << "输入新建存储库名：";
-        cin >> filename;
+        getline(cin, filename);
         if(filename.empty())
             return false;
         if(repositoryExists(filename))
@@ -130,6 +140,7 @@ bool createRepo()
             char confirm;
             cout << "存储库已存在，是否覆盖现有文件？(y/n):";
             cin >> confirm;
+            cin.ignore(32767, '\n');
             if(confirm == 'y' || confirm == 'Y')
                 break;
             continue;
@@ -142,14 +153,101 @@ bool createRepo()
     return true;
 }
 
+//启动日志进程 
+bool startLoggerProcess()
+{
+    STARTUPINFOW si = { sizeof(si) };
+    PROCESS_INFORMATION pi;
+    wchar_t cmd[] = L"logger.exe";
+    if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE,
+                        0, NULL, NULL, &si, &pi))
+        return false;
+    hLoggerProcess = pi.hProcess;
+    CloseHandle(pi.hThread);
+    return true;
+}
+
+//看门狗线程：监控日志进程是否崩溃
+void watchdogFunc()
+{
+    if (hLoggerProcess == NULL) return;
+    WaitForSingleObject(hLoggerProcess, INFINITE);
+    //日志进程已退出，检查是否为正常退出
+    if (!watchdogStop.load())
+    {
+        //保存未写入的数据到崩溃恢复文件
+        std::lock_guard<std::mutex> lock(dataMutex);
+        ofstream crash(CRASH_RECOVERY_FILE);
+        if (crash.is_open())
+        {
+            crash << currentRepoName << endl;
+            for (const auto& item : Data)
+                crash << item << endl;
+            crash.close();
+        }
+    }
+}
+
+// 返回 true 表示已恢复，可跳过存储库选择
+bool checkAndRecoverCrash()
+{
+    ifstream crashFile(CRASH_RECOVERY_FILE);
+    if (!crashFile.is_open())
+        return false;
+
+    string repoName;
+    if (!getline(crashFile, repoName) || repoName.empty())
+    {
+        crashFile.close();
+        return false;
+    }
+
+    cout << "检测到上次异常退出，正在恢复数据..." << endl;
+    cout << "存储库: " << repoName << endl;
+
+    Data.clear();
+    currentRepoName = repoName;
+
+    string line;
+    while (getline(crashFile, line))
+    {
+        if (!line.empty())
+            Data.push_back(line);
+    }
+    crashFile.close();
+
+    //删除崩溃恢复文件
+    DeleteFileA(CRASH_RECOVERY_FILE.c_str());
+
+    //调用 write 将恢复的数据写入正常存储文件
+    if (write())
+        cout << "已恢复 " << Data.size() << " 条数据到存储库" << endl;
+    else
+        cout << "恢复写入失败，数据保留在内存中" << endl;
+
+    return true;
+}
+
 int main()
 {
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
+
+    //启动时检查崩溃恢复
+    bool recovered = checkAndRecoverCrash();
+
     int operation = -1;//控制指令
     string tmpaddcin = "";//临时存储添加项/修改项
     string str = "";//临时存储查找项
     int idx = 0;//临时存储索引
+
+    //如果已从崩溃恢复，跳过存储库选择
+    if (recovered)
+    {
+        operation = 0;
+        cout << "当前存储库为: " << currentRepoName << endl;
+    }
+
     while(operation != 0)
     {
         switch(operation)
@@ -157,6 +255,7 @@ int main()
             case -1:
                 cout << "选择操作:1.读取存储库, 2.新建存储库" << endl;
                 cin >> operation;
+                cin.ignore(32767, '\n');
                 break;
             case 1:
                 if(loadRepo())
@@ -189,6 +288,10 @@ int main()
         }
     }
 
+    //启动日志进程和看门狗 
+    if (startLoggerProcess())
+        watchdogThread = std::thread(watchdogFunc);
+
     operation = -1;
     tmpaddcin = "";
 
@@ -199,13 +302,14 @@ int main()
             case -1:
                 cout << "选择操作:1.增加项, 2.删除项, 3.修改项, 4.查找项, 5.模糊查找, 6.读取存储库, 7.新建存储库, 0.退出" << endl;
                 cin >> operation;
+                cin.ignore(32767, '\n');
                 break;
             case 1:
                 cout << "连续写入,输入exit退出" << endl;
                 while(true)
                 {
                     cout << "添加数据:";
-                    cin >> tmpaddcin;
+                    getline(cin, tmpaddcin);
                     if(tmpaddcin == "exit")
                         break;
                     add(tmpaddcin);
@@ -221,14 +325,15 @@ int main()
             case 3:
                 cout << "修改项索引:";
                 cin >> idx;
+                cin.ignore(32767, '\n');
                 cout << "新的数据:";
-                cin >> tmpaddcin;
+                getline(cin, tmpaddcin);
                 mod(idx, tmpaddcin);
                 operation = -1;
                 break;
             case 4:
                 cout << "查找数据索引:";
-                cin >> str;
+                getline(cin, str);
                 idx = find(str);
                 if(idx != -1)
                     cout << "原文为:" << Data[idx] << endl;
@@ -238,7 +343,7 @@ int main()
                 break;
             case 5:
                 cout << "模糊查找数据:";
-                cin >> str;
+                getline(cin, str);
                 find_fuzzy(str);
                 operation = -1;
                 break;
@@ -267,6 +372,17 @@ int main()
                 operation = -1;
                 break;
             case 0:
+                //正常退出：停止看门狗和日志进程 
+                watchdogStop.store(true);
+                if (hLoggerProcess != NULL)
+                {
+                    TerminateProcess(hLoggerProcess, 0);
+                    CloseHandle(hLoggerProcess);
+                    hLoggerProcess = NULL;
+                }
+                if (watchdogThread.joinable())
+                    watchdogThread.join();
+                //正常写入并退出 
                 while(true)
                 {
                     bool result = write();
