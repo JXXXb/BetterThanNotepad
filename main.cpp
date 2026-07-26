@@ -117,7 +117,7 @@ bool loadRepo()
         size_t pos = line.find("@~");
         string value;
         if(pos != string::npos)
-            value = line.substr(pos + 1);
+            value = line.substr(pos + 2);
         else
             value = line;
         Data.push_back(value);
@@ -188,6 +188,22 @@ void watchdogFunc()
     }
 }
 
+void stopLoggerAndWatchdog()
+{
+    watchdogStop.store(true);
+    if (hLoggerProcess != NULL)
+        TerminateProcess(hLoggerProcess, 0);
+
+    if (watchdogThread.joinable())
+        watchdogThread.join();
+
+    if (hLoggerProcess != NULL)
+    {
+        CloseHandle(hLoggerProcess);
+        hLoggerProcess = NULL;
+    }
+}
+
 // 返回 true 表示已恢复，可跳过存储库选择
 bool checkAndRecoverCrash()
 {
@@ -253,7 +269,7 @@ int main()
         switch(operation)
         {
             case -1:
-                cout << "选择操作:1.读取存储库, 2.新建存储库" << endl;
+                cout << "选择操作:1.读取存储库, 2.新建存储库, 0.退出" << endl;
                 cin >> operation;
                 cin.ignore(32767, '\n');
                 break;
@@ -288,6 +304,12 @@ int main()
         }
     }
 
+    if(currentRepoName.empty())
+    {
+        cout << "Exit program" << endl;
+        return 0;
+    }
+
     //启动日志进程和看门狗 
     if (startLoggerProcess())
         watchdogThread = std::thread(watchdogFunc);
@@ -295,7 +317,7 @@ int main()
     operation = -1;
     tmpaddcin = "";
 
-    while(operation != 0)
+    while(true)
     {
         switch(operation)
         {
@@ -352,6 +374,7 @@ int main()
                 {
                     cout << "读取成功" << endl;
                     cout << "当前存储库为: " << currentRepoName << endl;
+                    operation = -1;
                 }
                 else
                 {
@@ -373,15 +396,7 @@ int main()
                 break;
             case 0:
                 //正常退出：停止看门狗和日志进程 
-                watchdogStop.store(true);
-                if (hLoggerProcess != NULL)
-                {
-                    TerminateProcess(hLoggerProcess, 0);
-                    CloseHandle(hLoggerProcess);
-                    hLoggerProcess = NULL;
-                }
-                if (watchdogThread.joinable())
-                    watchdogThread.join();
+                stopLoggerAndWatchdog();
                 //正常写入并退出 
                 while(true)
                 {
