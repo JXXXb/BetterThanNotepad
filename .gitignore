@@ -1,0 +1,16 @@
+# Build outputs
+*.exe
+*.o
+*.obj
+
+# Log files
+*.log
+
+# Crash recovery
+crash_recovery.txt
+
+# IDE
+.vscode/
+
+# Release tools (local only)
+.release-tools/

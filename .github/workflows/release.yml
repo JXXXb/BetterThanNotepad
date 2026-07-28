@@ -1,0 +1,119 @@
+name: Build and Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: '版本号递增级别'
+        required: true
+        type: choice
+        default: 'patch'
+        options:
+          - patch
+          - minor
+          - major
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout 代码
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 安装 MinGW (MSYS2)
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-gcc
+
+      - name: 编译 logger.exe
+        shell: msys2 {0}
+        run: |
+          g++ -o logger.exe logger.cpp -std=c++11 -static -O2
+
+      - name: 编译 main.exe
+        shell: msys2 {0}
+        run: |
+          g++ -o main.exe main.cpp -std=c++11 -static -O2
+
+      - name: 计算下一个版本号
+        id: version
+        shell: bash
+        run: |
+          # 获取最新 tag，如果没有则从 v0.0.0 开始
+          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+          echo "当前最新标签: $LATEST_TAG"
+
+          # 去掉 v 前缀
+          VERSION="${LATEST_TAG#v}"
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+
+          # 默认值保护
+          MAJOR=${MAJOR:-0}
+          MINOR=${MINOR:-0}
+          PATCH=${PATCH:-0}
+
+          # 根据触发方式决定递增级别
+          BUMP="${{ github.event.inputs.bump || 'patch' }}"
+
+          case "$BUMP" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            patch|*)
+              PATCH=$((PATCH + 1))
+              ;;
+          esac
+
+          NEW_VERSION="v$MAJOR.$MINOR.$PATCH"
+          echo "新版本号: $NEW_VERSION"
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "previous_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+
+      - name: 创建 Git 标签
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag ${{ steps.version.outputs.version }}
+          git push origin ${{ steps.version.outputs.version }}
+
+      - name: 创建 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Release ${{ steps.version.outputs.version }}
+          body: |
+            ## 🔄 自动构建发行版
+
+            从 `${{ steps.version.outputs.previous_tag }}` → `${{ steps.version.outputs.version }}`
+
+            ### 📦 包含文件
+            - `main.exe` — 主程序
+            - `logger.exe` — 看门狗/日志进程
+
+            ### 🛠️ 构建信息
+            - 编译器: g++ (MinGW64)
+            - 标准: C++11
+            - 链接: 静态链接
+          files: |
+            main.exe
+            logger.exe
+          generate_release_notes: false
+          make_latest: true
