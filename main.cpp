@@ -340,8 +340,18 @@ int main()
                 break;
             case 2:
                 cout << "删除项的索引:";
-                cin >> idx;
-                pop(idx);
+                if(!(cin >> idx))
+                {
+                    cin.clear();
+                    cin.ignore(32767, '\n');
+                    cout << "无效的索引" << endl;
+                }
+                else
+                {
+                    cin.ignore(32767, '\n');
+                    if(!pop(idx))
+                        cout << "索引超出范围" << endl;
+                }
                 operation = -1;
                 break;
             case 3:
