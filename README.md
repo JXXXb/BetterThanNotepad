@@ -24,12 +24,13 @@ recovers unsaved data.
 【Build】
 
   # 1. Build the logger process first
-  g++ -o logger.exe logger.cpp -std=c++11
+  g++ -fdiagnostics-color=always -g -static -std=c++11 logger.cpp -o logger.exe
 
   # 2. Then build the main program
-  g++ -o main.exe  main.cpp  -std=c++11
+  g++ -fdiagnostics-color=always -g -static -std=c++11 main.cpp -o main.exe
 
   # Both must be placed in the same directory
+  # -static: statically link libstdc++/libgcc, no external DLLs needed
 
 【Run】
   main.exe
