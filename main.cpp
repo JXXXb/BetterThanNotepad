@@ -3,16 +3,22 @@
 #include<string>
 #include<vector>
 #include<windows.h>
-#include<thread>
 #include<mutex>
+#include<thread>
 #include<atomic>
+#include<chrono>
 using namespace std;
 
 vector<string> Data;
 
+// === 看门狗/崩溃恢复系统（必须在函数定义之前）===
+std::mutex dataMutex;
+const string CRASH_RECOVERY_FILE = "crash_recovery.txt";
+
 //增加项函数
 bool add(string str)
 {
+    std::lock_guard<std::mutex> lock(dataMutex);
     Data.push_back(str);
     return true;
 }
@@ -20,6 +26,7 @@ bool add(string str)
 //删除项函数
 bool pop(int idx)
 {
+    std::lock_guard<std::mutex> lock(dataMutex);
     if(idx >= 0 && idx < Data.size())
     {
         Data.erase(Data.begin() + idx);
@@ -31,6 +38,7 @@ bool pop(int idx)
 //修改项函数
 bool mod(int idx, string str)
 {
+    std::lock_guard<std::mutex> lock(dataMutex);
     if(idx >= 0 && idx < Data.size())
     {
         Data[idx] = str;
@@ -66,12 +74,26 @@ int find_fuzzy(string str)
 
 string currentRepoName = "";
 
-//  看门狗/崩溃恢复系统 
+//  看门狗运行状态
 HANDLE hLoggerProcess = NULL;
-std::thread watchdogThread;
-std::atomic<bool> watchdogStop(false);
-std::mutex dataMutex;
-const string CRASH_RECOVERY_FILE = "crash_recovery.txt";
+const string STATE_FILE = ".repo_state.tmp";
+
+//  自动保存（前置声明 write）
+bool write();
+
+std::thread autoSaveThread;
+std::atomic<bool> autoSaveRunning(false);
+
+void autoSaveFunc()
+{
+    while (autoSaveRunning.load())
+    {
+        std::this_thread::sleep_for(std::chrono::seconds(20));
+        if (!autoSaveRunning.load()) break;
+        std::lock_guard<std::mutex> lock(dataMutex);
+        write();
+    }
+}
 
 bool write()
 {
@@ -106,6 +128,7 @@ bool loadRepo()
     if(!in.is_open())
         return false;
 
+    std::lock_guard<std::mutex> lock(dataMutex);
     Data.clear();
     currentRepoName = filename;
 
@@ -148,18 +171,62 @@ bool createRepo()
         break;
     }
 
+    std::lock_guard<std::mutex> lock(dataMutex);
     vector<string>().swap(Data); //清空Data
     currentRepoName = filename;
     return true;
 }
 
-//启动日志进程 
+// === 状态文件：用于崩溃恢复 ===
+void saveState()
+{
+    if (currentRepoName.empty()) return;
+    std::lock_guard<std::mutex> lock(dataMutex);
+    ofstream state(STATE_FILE);
+    if (!state.is_open()) return;
+    state << currentRepoName << endl;
+    for (const auto& item : Data)
+        state << item << endl;
+    state.close();
+}
+
+void deleteState()
+{
+    DeleteFileA(STATE_FILE.c_str());
+}
+
+// === 将操作事件写入 logger.log（与 logger.exe 共用）===
+void logOp(const string &action, const string &detail = "")
+{
+    ofstream log("logger.log", ios::app);
+    if (!log.is_open()) return;
+    time_t now = time(nullptr);
+    char buf[64];
+    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", localtime(&now));
+    log << "[" << buf << "] [MAIN] " << action;
+    if (!detail.empty())
+        log << " | " << detail;
+    log << endl;
+    log.close();
+}
+
+// === 启动日志进程（看门狗，传入 main.exe 的 PID）===
 bool startLoggerProcess()
 {
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(NULL, exePath, MAX_PATH);
+    wstring dir(exePath);
+    size_t pos = dir.find_last_of(L"\\/");
+    if (pos != wstring::npos)
+        dir = dir.substr(0, pos + 1);
+    wstring loggerPath = dir + L"logger.exe";
+
+    // 把当前进程 PID 传给 logger.exe
+    wstring cmdLine = L"\"" + loggerPath + L"\" " + to_wstring(GetCurrentProcessId());
+
     STARTUPINFOW si = { sizeof(si) };
     PROCESS_INFORMATION pi;
-    wchar_t cmd[] = L"logger.exe";
-    if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE,
+    if (!CreateProcessW(NULL, &cmdLine[0], NULL, NULL, FALSE,
                         0, NULL, NULL, &si, &pi))
         return false;
     hLoggerProcess = pi.hProcess;
@@ -167,41 +234,23 @@ bool startLoggerProcess()
     return true;
 }
 
-//看门狗线程：监控日志进程是否崩溃
-void watchdogFunc()
+// === 正常退出：停止日志进程并清理状态文件 ===
+void stopLogger()
 {
-    if (hLoggerProcess == NULL) return;
-    WaitForSingleObject(hLoggerProcess, INFINITE);
-    //日志进程已退出，检查是否为正常退出
-    if (!watchdogStop.load())
-    {
-        //保存未写入的数据到崩溃恢复文件
-        std::lock_guard<std::mutex> lock(dataMutex);
-        ofstream crash(CRASH_RECOVERY_FILE);
-        if (crash.is_open())
-        {
-            crash << currentRepoName << endl;
-            for (const auto& item : Data)
-                crash << item << endl;
-            crash.close();
-        }
-    }
-}
+    // 停止自动保存
+    autoSaveRunning.store(false);
+    if (autoSaveThread.joinable())
+        autoSaveThread.join();
 
-void stopLoggerAndWatchdog()
-{
-    watchdogStop.store(true);
+    deleteState();  // 先删状态文件，这样 logger 判定为正常退出
     if (hLoggerProcess != NULL)
+    {
         TerminateProcess(hLoggerProcess, 0);
-
-    if (watchdogThread.joinable())
-        watchdogThread.join();
-
-    if (hLoggerProcess != NULL)
-    {
         CloseHandle(hLoggerProcess);
         hLoggerProcess = NULL;
     }
+    // 清理可能残留的崩溃恢复文件
+    DeleteFileA(CRASH_RECOVERY_FILE.c_str());
 }
 
 // 返回 true 表示已恢复，可跳过存储库选择
@@ -310,9 +359,21 @@ int main()
         return 0;
     }
 
-    //启动日志进程和看门狗 
+    //启动日志进程（看门狗） 
     if (startLoggerProcess())
-        watchdogThread = std::thread(watchdogFunc);
+    {
+        cout << "[看门狗] 日志进程已启动，崩溃保护已激活" << endl;
+        saveState();  // 写入初始状态
+    }
+    else
+    {
+        cout << "[看门狗] 警告：无法启动日志进程，崩溃保护未激活" << endl;
+    }
+
+    // 启动自动保存（每20秒）
+    autoSaveRunning.store(true);
+    autoSaveThread = std::thread(autoSaveFunc);
+    cout << "[自动保存] 已开启, 每20秒自动保存一次" << endl;
 
     operation = -1;
     tmpaddcin = "";
@@ -336,6 +397,8 @@ int main()
                         break;
                     add(tmpaddcin);
                 }
+                saveState();
+                logOp("ADD", "total=" + to_string(Data.size()));
                 operation = -1;
                 break;
             case 2:
@@ -352,6 +415,8 @@ int main()
                     if(!pop(idx))
                         cout << "索引超出范围" << endl;
                 }
+                saveState();
+                logOp("DELETE", "index=" + to_string(idx));
                 operation = -1;
                 break;
             case 3:
@@ -361,6 +426,8 @@ int main()
                 cout << "新的数据:";
                 getline(cin, tmpaddcin);
                 mod(idx, tmpaddcin);
+                saveState();
+                logOp("MODIFY", "index=" + to_string(idx) + " new=" + tmpaddcin);
                 operation = -1;
                 break;
             case 4:
@@ -384,6 +451,8 @@ int main()
                 {
                     cout << "读取成功" << endl;
                     cout << "当前存储库为: " << currentRepoName << endl;
+                    saveState();
+                    logOp("LOAD_REPO", currentRepoName);
                     operation = -1;
                 }
                 else
@@ -397,6 +466,8 @@ int main()
                 if(createRepo())
                 {
                     cout << "已创建并切换到存储库: " << currentRepoName << endl;
+                    saveState();
+                    logOp("CREATE_REPO", currentRepoName);
                 }
                 else
                 {
@@ -405,8 +476,7 @@ int main()
                 operation = -1;
                 break;
             case 0:
-                //正常退出：停止看门狗和日志进程 
-                stopLoggerAndWatchdog();
+                logOp("EXIT", "saving " + to_string(Data.size()) + " items to " + currentRepoName);
                 //正常写入并退出 
                 while(true)
                 {
@@ -414,10 +484,14 @@ int main()
                     if(result)
                     {
                         cout << Data.size() << "  已写入" << endl;
+                        //正常退出：停止日志进程
+                        stopLogger();
                         return 0;
                     }
                     else
+                    {
                         cout << "写入文件失败，正在重写" << endl;
+                    }
                     continue;
                 }
                 break;
