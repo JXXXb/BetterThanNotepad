@@ -95,6 +95,24 @@ void autoSaveFunc()
     }
 }
 
+//列出所有项
+bool listItems()
+{
+    std::lock_guard<std::mutex> lock(dataMutex);
+    if (Data.empty())
+    {
+        cout << "存储库为空" << endl;
+        return false;
+    }
+    for (int i = 0; i < Data.size(); i++)
+    {
+        cout << i << "  " << Data[i] << endl;
+        cout << "共" << "Data.size()" << "条数据" << endl;
+    }
+    return true;
+}
+
+//写入
 bool write()
 {
     if(currentRepoName.empty())
@@ -113,12 +131,14 @@ bool write()
     return true;
 }
 
+//创建文件
 bool repositoryExists(const string &filename)
 {
     ifstream in(filename + ".txt");
     return in.is_open();
 }
 
+//读取存储库
 bool loadRepo()
 {
     string filename;
@@ -149,6 +169,7 @@ bool loadRepo()
     return true;
 }
 
+//创建存储库
 bool createRepo()
 {
     string filename;
@@ -383,7 +404,7 @@ int main()
         switch(operation)
         {
             case -1:
-                cout << "选择操作:1.增加项, 2.删除项, 3.修改项, 4.查找项, 5.模糊查找, 6.读取存储库, 7.新建存储库, 0.退出" << endl;
+                cout << "选择操作:1.增加项, 2.删除项, 3.修改项, 4.查找项, 5.模糊查找, 6.读取存储库, 7.新建存储库, 0.退出, 8.列出所有项" << endl;
                 cin >> operation;
                 cin.ignore(32767, '\n');
                 break;
@@ -473,6 +494,10 @@ int main()
                 {
                     cout << "新建存储库失败" << endl;
                 }
+                operation = -1;
+                break;
+            case 8:
+                listItems();
                 operation = -1;
                 break;
             case 0:
