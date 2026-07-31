@@ -13,7 +13,7 @@ vector<string> Data;
 
 // === 看门狗/崩溃恢复系统（必须在函数定义之前）===
 std::mutex dataMutex;
-const string CRASH_RECOVERY_FILE = "crash_recovery.txt";
+const string MAINERROR_FILE = ".mainerror";
 
 //增加项函数
 bool add(string str)
@@ -88,7 +88,11 @@ void autoSaveFunc()
 {
     while (autoSaveRunning.load())
     {
-        std::this_thread::sleep_for(std::chrono::seconds(20));
+        // 每1秒检查一次退出标志，最多等20秒后执行保存
+        for (int i = 0; i < 20 && autoSaveRunning.load(); i++)
+        {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
         if (!autoSaveRunning.load()) break;
         std::lock_guard<std::mutex> lock(dataMutex);
         write();
@@ -195,10 +199,11 @@ bool createRepo()
     std::lock_guard<std::mutex> lock(dataMutex);
     vector<string>().swap(Data); //清空Data
     currentRepoName = filename;
+    write();
     return true;
 }
 
-// === 状态文件：用于崩溃恢复 ===
+//=== 状态文件：用于崩溃恢复 ===
 void saveState()
 {
     if (currentRepoName.empty()) return;
@@ -216,19 +221,19 @@ void deleteState()
     DeleteFileA(STATE_FILE.c_str());
 }
 
-// === 将操作事件写入 logger.log（与 logger.exe 共用）===
+// === 将操作事件写入操作队列（logger.exe 会读取并记录）===
 void logOp(const string &action, const string &detail = "")
 {
-    ofstream log("logger.log", ios::app);
-    if (!log.is_open()) return;
+    ofstream q(".opqueue.tmp", ios::app);
+    if (!q.is_open()) return;
     time_t now = time(nullptr);
     char buf[64];
     strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", localtime(&now));
-    log << "[" << buf << "] [MAIN] " << action;
+    q << "[" << buf << "] " << action;
     if (!detail.empty())
-        log << " | " << detail;
-    log << endl;
-    log.close();
+        q << " | " << detail;
+    q << endl;
+    q.close();
 }
 
 // === 启动日志进程（看门狗，传入 main.exe 的 PID）===
@@ -247,8 +252,9 @@ bool startLoggerProcess()
 
     STARTUPINFOW si = { sizeof(si) };
     PROCESS_INFORMATION pi;
+    // DETACHED_PROCESS: logger 不属于本控制台，Ctrl+C/关窗口不会杀死它
     if (!CreateProcessW(NULL, &cmdLine[0], NULL, NULL, FALSE,
-                        0, NULL, NULL, &si, &pi))
+                        DETACHED_PROCESS, NULL, NULL, &si, &pi))
         return false;
     hLoggerProcess = pi.hProcess;
     CloseHandle(pi.hThread);
@@ -270,42 +276,65 @@ void stopLogger()
         CloseHandle(hLoggerProcess);
         hLoggerProcess = NULL;
     }
-    // 清理可能残留的崩溃恢复文件
-    DeleteFileA(CRASH_RECOVERY_FILE.c_str());
+    // 清理可能残留的崩溃标记文件
+    DeleteFileA(MAINERROR_FILE.c_str());
 }
 
 // 返回 true 表示已恢复，可跳过存储库选择
 bool checkAndRecoverCrash()
 {
-    ifstream crashFile(CRASH_RECOVERY_FILE);
-    if (!crashFile.is_open())
+    // 检查 .mainerror 崩溃标记是否存在
+    ifstream mainerrorFile(MAINERROR_FILE);
+    if (!mainerrorFile.is_open())
         return false;
+    mainerrorFile.close();
 
-    string repoName;
-    if (!getline(crashFile, repoName) || repoName.empty())
+    // 先删除崩溃标记文件
+    DeleteFileA(MAINERROR_FILE.c_str());
+
+    cout << "检测到上次异常退出（.mainerror）。" << endl;
+
+    // 检查日志文件是否存在
+    ifstream logFile("logger.log");
+    if (!logFile.is_open())
     {
-        crashFile.close();
+        cout << "未找到日志文件，无法恢复数据。" << endl;
+        return false;
+    }
+    logFile.close();
+
+    // 日志存在 → 从状态文件恢复内容
+    cout << "正在从状态文件恢复数据..." << endl;
+
+    ifstream stateFile(STATE_FILE);
+    if (!stateFile.is_open())
+    {
+        cout << "未找到状态文件，无法恢复数据。" << endl;
         return false;
     }
 
-    cout << "检测到上次异常退出，正在恢复数据..." << endl;
+    string repoName;
+    if (!getline(stateFile, repoName) || repoName.empty())
+    {
+        cout << "状态文件损坏（无存储库名），无法恢复。" << endl;
+        stateFile.close();
+        return false;
+    }
+
     cout << "存储库: " << repoName << endl;
 
     Data.clear();
     currentRepoName = repoName;
 
     string line;
-    while (getline(crashFile, line))
+    while (getline(stateFile, line))
     {
         if (!line.empty())
             Data.push_back(line);
     }
-    crashFile.close();
+    stateFile.close();
 
-    //删除崩溃恢复文件
-    DeleteFileA(CRASH_RECOVERY_FILE.c_str());
-
-    //调用 write 将恢复的数据写入正常存储文件
+    // 立即执行 write 将恢复的数据写入正常存储文件
     if (write())
         cout << "已恢复 " << Data.size() << " 条数据到存储库" << endl;
     else
@@ -340,8 +369,17 @@ int main()
         {
             case -1:
                 cout << "选择操作:1.读取存储库, 2.新建存储库, 0.退出" << endl;
-                cin >> operation;
-                cin.ignore(32767, '\n');
+                if (!(cin >> operation))
+                {
+                    cin.clear();
+                    cin.ignore(32767, '\n');
+                    cout << "无效输入，请输入数字" << endl;
+                    operation = -1;
+                }
+                else
+                {
+                    cin.ignore(32767, '\n');
+                }
                 break;
             case 1:
                 if(loadRepo())
@@ -406,7 +444,6 @@ int main()
             case -1:
                 cout << "选择操作:1.增加项, 2.删除项, 3.修改项, 4.查找项, 5.模糊查找, 6.读取存储库, 7.新建存储库, 0.退出, 8.列出所有项" << endl;
                 cin >> operation;
-                cin.ignore(32767, '\n');
                 break;
             case 1:
                 cout << "连续写入,输入exit退出" << endl;

@@ -2,12 +2,16 @@
 *.exe
 *.o
 *.obj
+*.res
 
 # Log files
 *.log
+*.tmp
+*.proc
 
 # Crash recovery
 crash_recovery.txt
+*.txt.tmp
 
 # IDE
 .vscode/
