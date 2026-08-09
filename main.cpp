@@ -81,8 +81,15 @@ const string STATE_FILE = ".repo_state.tmp";
 //  自动保存（前置声明 write）
 bool write();
 
+// 前置声明，供 watchLoggerFunc 使用
+bool startLoggerProcess();
+
 std::thread autoSaveThread;
 std::atomic<bool> autoSaveRunning(false);
+
+// main 监控 logger 是否存活，挂了就自动重启
+std::thread loggerWatchThread;
+std::atomic<bool> loggerWatchRunning(false);
 
 void autoSaveFunc()
 {
@@ -96,6 +103,33 @@ void autoSaveFunc()
         if (!autoSaveRunning.load()) break;
         std::lock_guard<std::mutex> lock(dataMutex);
         write();
+    }
+}
+
+// main 端监控 logger.exe，挂了就重启
+void watchLoggerFunc()
+{
+    while (loggerWatchRunning.load())
+    {
+        // 每3秒检查一次
+        for (int i = 0; i < 3 && loggerWatchRunning.load(); i++)
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        if (!loggerWatchRunning.load()) break;
+
+        if (hLoggerProcess == NULL) continue;
+
+        DWORD exitCode;
+        if (GetExitCodeProcess(hLoggerProcess, &exitCode) && exitCode != STILL_ACTIVE)
+        {
+            CloseHandle(hLoggerProcess);
+            hLoggerProcess = NULL;
+
+            cout << "[看门狗] logger.exe 已终止，正在重启..." << endl;
+            if (startLoggerProcess())
+                cout << "[看门狗] logger.exe 已重新启动" << endl;
+            else
+                cout << "[看门狗] logger.exe 重启失败" << endl;
+        }
     }
 }
 
@@ -269,6 +303,11 @@ void stopLogger()
     if (autoSaveThread.joinable())
         autoSaveThread.join();
 
+    // 停止 logger 存活监控
+    loggerWatchRunning.store(false);
+    if (loggerWatchThread.joinable())
+        loggerWatchThread.join();
+
     deleteState();  // 先删状态文件，这样 logger 判定为正常退出
     if (hLoggerProcess != NULL)
     {
@@ -433,6 +472,10 @@ int main()
     autoSaveRunning.store(true);
     autoSaveThread = std::thread(autoSaveFunc);
     cout << "[自动保存] 已开启, 每20秒自动保存一次" << endl;
+
+    // 启动 logger 存活监控（main 端双向检验）
+    loggerWatchRunning.store(true);
+    loggerWatchThread = std::thread(watchLoggerFunc);
 
     operation = -1;
     tmpaddcin = "";
