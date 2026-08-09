@@ -22,7 +22,52 @@
                 "kind": "build",
                 "isDefault": true
             },
-            "detail": "调试器生成的任务。"
+            "detail": "编译当前活动文件"
+        },
+        {
+            "type": "shell",
+            "label": "构建 main.exe",
+            "command": "C:\\mingw64\\bin\\g++.exe -fdiagnostics-color=always -g -static \"${workspaceFolder}\\main.cpp\" -o \"${workspaceFolder}\\main.exe\"",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "detail": "编译 main.cpp → main.exe"
+        },
+        {
+            "type": "shell",
+            "label": "构建 logger.exe",
+            "command": "C:\\mingw64\\bin\\g++.exe -fdiagnostics-color=always -g -static \"${workspaceFolder}\\logger.cpp\" -o \"${workspaceFolder}\\logger.exe\"",
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "problemMatcher": [
+                "$gcc"
+            ],
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "detail": "编译 logger.cpp → logger.exe"
+        },
+        {
+            "label": "构建全部 (main.exe + logger.exe)",
+            "dependsOn": [
+                "构建 main.exe",
+                "构建 logger.exe"
+            ],
+            "dependsOrder": "sequence",
+            "group": {
+                "kind": "build",
+                "isDefault": false
+            },
+            "detail": "编译全部：main.exe → logger.exe"
         }
     ],
     "version": "2.0.0"

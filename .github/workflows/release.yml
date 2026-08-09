@@ -37,15 +37,21 @@ jobs:
           install: >-
             mingw-w64-x86_64-gcc
 
+      - name: 编译资源文件 (UAC 清单)
+        shell: msys2 {0}
+        run: |
+          windres main.rc   -o main_res.o
+          windres logger.rc -o logger_res.o
+
       - name: 编译 logger.exe
         shell: msys2 {0}
         run: |
-          g++ -o logger.exe logger.cpp -std=c++11 -static -O2
+          g++ -o logger.exe logger.cpp logger_res.o -std=c++11 -static -O2
 
       - name: 编译 main.exe
         shell: msys2 {0}
         run: |
-          g++ -o main.exe main.cpp -std=c++11 -static -O2
+          g++ -o main.exe main.cpp main_res.o -std=c++11 -static -O2
 
       - name: 计算下一个版本号
         id: version

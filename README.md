@@ -33,10 +33,10 @@ windres main.rc   -o main_res.o
 windres logger.rc -o logger_res.o
 
 # 1. Build the logger (watchdog) process
-g++ -o logger.exe logger.cpp logger_res.o -std=c++11
+g++ -o logger.exe logger.cpp logger_res.o -std=c++11 -static
 
 # 2. Build the main program
-g++ -o main.exe  main.cpp  main_res.o  -std=c++11
+g++ -o main.exe  main.cpp  main_res.o  -std=c++11 -static
 ```
 
 Both .exe will request administrator privileges on launch (UAC prompt).
@@ -70,17 +70,19 @@ main.exe ──launches──> logger.exe <main-PID>
     │                         → logger detects clean exit, does nothing
     │
     └─ crash ───────────────> .repo_state.tmp remains on disk
-                              → logger detects crash → reads state
-                              → writes crash_recovery.txt
+                              → logger detects crash
+                              → creates empty .mainerror marker
 ```
 
 ### Recovery Flow
 
 1. main.exe crashes → logger.exe detects process death
-2. logger.exe finds .repo_state.tmp → reads it → writes crash_recovery.txt
+2. logger.exe finds .repo_state.tmp → creates empty .mainerror marker
 3. User restarts main.exe
-4. Program detects crash_recovery.txt → loads data → calls write()
-   → deletes recovery file → enters main menu directly
+4. Program detects .mainerror → checks logger.log exists
+   → reads state from .repo_state.tmp → calls write()
+   → deletes .mainerror → enters main menu directly
+5. If .mainerror exists but logger.log is missing → prints notice, skips recovery
 
 ## How to Test Crash Recovery
 
@@ -88,10 +90,10 @@ main.exe ──launches──> logger.exe <main-PID>
 2. Add a few test entries from the main menu
 3. Open Task Manager (Ctrl+Shift+Esc), find main.exe → End task
 4. logger.exe detects main.exe is gone + .repo_state.tmp exists
-   → crash_recovery.txt is generated automatically
+   → empty .mainerror file is created as crash marker
 5. Relaunch main.exe
-6. Observe the prompt "Detected abnormal exit, recovering data..."
-7. Data has been automatically restored to the repository file
+6. Observe the prompt "检测到上次异常退出（.mainerror）。"
+7. Data has been automatically restored from .repo_state.tmp to the repository file
 
 ## Operation Logging
 
@@ -137,10 +139,15 @@ Both main.exe and logger.exe write to logger.log:
 2 Orange
 ```
 
-## Crash Recovery File Format
+## Crash Recovery Files
 
-- crash_recovery.txt: first line = repo name, then one data entry per line
-- Example:
+| File | Purpose |
+|------|---------|
+| `.mainerror` | Empty marker — logger creates this on crash |
+| `logger.log` | Operation log — confirms crash was monitored |
+| `.repo_state.tmp` | State snapshot — first line repo name, rest are data entries |
+
+Example `.repo_state.tmp`:
 
 ```text
 mydata
@@ -157,6 +164,7 @@ Orange
 - Auto-save every 20 seconds — no manual save required
 - logger.exe must reside in the same directory as main.exe
 - On normal exit, .repo_state.tmp is deleted → logger knows it was clean
+- On crash, logger creates .mainerror → next launch auto-recovers from .repo_state.tmp
 
 ## Tech Stack
 

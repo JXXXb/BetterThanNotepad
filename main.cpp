@@ -111,8 +111,8 @@ bool listItems()
     for (int i = 0; i < Data.size(); i++)
     {
         cout << i << "  " << Data[i] << endl;
-        cout << "共" << "Data.size()" << "条数据" << endl;
     }
+    cout << "共" << Data.size() << "条数据" << endl;
     return true;
 }
 
@@ -443,7 +443,17 @@ int main()
         {
             case -1:
                 cout << "选择操作:1.增加项, 2.删除项, 3.修改项, 4.查找项, 5.模糊查找, 6.读取存储库, 7.新建存储库, 0.退出, 8.列出所有项" << endl;
-                cin >> operation;
+                if (!(cin >> operation))
+                {
+                    cin.clear();
+                    cin.ignore(32767, '\n');
+                    cout << "无效输入，请输入数字" << endl;
+                    operation = -1;
+                }
+                else
+                {
+                    cin.ignore(32767, '\n');
+                }
                 break;
             case 1:
                 cout << "连续写入,输入exit退出" << endl;
@@ -479,7 +489,14 @@ int main()
                 break;
             case 3:
                 cout << "修改项索引:";
-                cin >> idx;
+                if (!(cin >> idx))
+                {
+                    cin.clear();
+                    cin.ignore(32767, '\n');
+                    cout << "无效的索引" << endl;
+                    operation = -1;
+                    break;
+                }
                 cin.ignore(32767, '\n');
                 cout << "新的数据:";
                 getline(cin, tmpaddcin);
