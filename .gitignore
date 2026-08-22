@@ -1,20 +1,59 @@
-# Build outputs
+# === 编译输出 ===
 *.exe
-*.o
-*.obj
-*.res
+*.dll
+*.lib
+*.exp
+*.ilk
+*.pdb
+*.idb
+*.ipdb
+*.iobj
 
-# Log files
+# === 中间文件 ===
+*.obj
+*.o
+*.res
+*.sbr
+*.bsc
+*.aps
+
+# === MSBuild 中间目录 ===
+out/
+Debug/
+Release/
+x64/
+Win32/
+*.tlog/
+
+# === IDE / 用户配置 ===
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# === 日志与运行时文件 ===
 *.log
 *.tmp
 *.proc
 
-# Crash recovery
+# === 崩溃恢复 ===
 crash_recovery.txt
+.mainerror
+*.pid
 *.txt.tmp
 
-# IDE
-.vscode/
+# === CMake 构建目录（本地生成） ===
+build/
+CMakeUserPresets.json
 
-# Release tools (local only)
+# === 临时文件 ===
+~$*
+*.swp
+*.swo
+Thumbs.db
+Desktop.ini
+.DS_Store
+.vs
+
+# === 发布工具（本地） ===
 .release-tools/

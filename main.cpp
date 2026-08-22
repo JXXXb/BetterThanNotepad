@@ -1,25 +1,40 @@
-#include<iostream>
+﻿#include<iostream>
 #include<fstream>
 #include<string>
 #include<vector>
+#define NOMINMAX
 #include<windows.h>
+#include<ctime>
 #include<mutex>
 #include<thread>
 #include<atomic>
 #include<chrono>
+#include<limits>
+
+#ifdef _MSC_VER
+#pragma execution_character_set("utf-8")
+#endif
+
 using namespace std;
 
 vector<string> Data;
 
-// === 看门狗/崩溃恢复系统（必须在函数定义之前）===
+// === 看门狗/ 崩溃恢复系统（必须在函数定义之前）===
 std::mutex dataMutex;
 const string MAINERROR_FILE = ".mainerror";
+
+// 前置声明：将操作事件写入操作队列（logger.exe 会读取并记录）
+void logOp(const string &action, const string &detail);
 
 //增加项函数
 bool add(string str)
 {
     std::lock_guard<std::mutex> lock(dataMutex);
     Data.push_back(str);
+    // 记录操作日志：新增项，记录新索引和当前总数
+    try {
+        logOp("ADD", "index=" + to_string((int)Data.size() - 1) + " total=" + to_string((int)Data.size()));
+    } catch(...) {}
     return true;
 }
 
@@ -30,6 +45,10 @@ bool pop(int idx)
     if(idx >= 0 && idx < Data.size())
     {
         Data.erase(Data.begin() + idx);
+        // 记录操作日志：删除项，记录被删除的索引和删除后的总数
+        try {
+            logOp("DELETE", "index=" + to_string(idx) + " total=" + to_string((int)Data.size()));
+        } catch(...) {}
         return true;
     }
     return false;
@@ -42,6 +61,10 @@ bool mod(int idx, string str)
     if(idx >= 0 && idx < Data.size())
     {
         Data[idx] = str;
+        // 记录操作日志：修改项，记录索引与新值的简要信息
+        try {
+            logOp("MODIFY", "index=" + to_string(idx) + " new=" + str);
+        } catch(...) {}
         return true;
     }
     return false;
@@ -60,13 +83,14 @@ int find(string str)
     return -1;
 }
 
+//模糊查找项函数
 int find_fuzzy(string str)
 {
     for(int i = 0; i < Data.size(); i++)
     {
         if (Data[i].find(str) != std::string::npos)//Data[i]包含str
         {
-            cout << "索引为: " << i << "原文为:" << Data[i] << endl;
+            cout << "索引为: " << i << " 原文为:" << Data[i] << endl;
         }
     }
     return -1;
@@ -113,7 +137,7 @@ void watchLoggerFunc()
     {
         // 每3秒检查一次
         for (int i = 0; i < 3 && loggerWatchRunning.load(); i++)
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::this_thread::sleep_for(std::chrono::seconds(3));
         if (!loggerWatchRunning.load()) break;
 
         if (hLoggerProcess == NULL) continue;
@@ -124,11 +148,11 @@ void watchLoggerFunc()
             CloseHandle(hLoggerProcess);
             hLoggerProcess = NULL;
 
-            cout << "[看门狗] logger.exe 已终止，正在重启..." << endl;
+            cout << endl <<  "[看门狗] logger.exe 已终止，正在重启..." << endl << "请继续输入：";
             if (startLoggerProcess())
-                cout << "[看门狗] logger.exe 已重新启动" << endl;
+                cout << endl << "[看门狗] logger.exe 已重新启动" << endl << "请继续输入：";
             else
-                cout << "[看门狗] logger.exe 重启失败" << endl;
+                cout << endl << "[看门狗] logger.exe 重启失败" << endl << "请继续输入：";
         }
     }
 }
@@ -222,7 +246,7 @@ bool createRepo()
             char confirm;
             cout << "存储库已存在，是否覆盖现有文件？(y/n):";
             cin >> confirm;
-            cin.ignore(32767, '\n');
+            cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
             if(confirm == 'y' || confirm == 'Y')
                 break;
             continue;
@@ -282,14 +306,75 @@ bool startLoggerProcess()
     wstring loggerPath = dir + L"logger.exe";
 
     // 把当前进程 PID 传给 logger.exe
+    // 使用 lpApplicationName + 可修改的命令行缓冲区以避免 CreateProcessW 在某些环境下失败
     wstring cmdLine = L"\"" + loggerPath + L"\" " + to_wstring(GetCurrentProcessId());
+    // CreateProcessW 可能会修改命令行缓冲区，传递可写的 wchar_t*
+    vector<wchar_t> cmdBuf(cmdLine.begin(), cmdLine.end());
+    cmdBuf.push_back(L'\0');
 
-    STARTUPINFOW si = { sizeof(si) };
-    PROCESS_INFORMATION pi;
+    STARTUPINFOW si = { 0 };
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi = { 0 };
+    // 诊断：将即将执行的命令行与路径写入调试日志，便于在 VS 环境下追踪
+    ofstream dbglog(".start_logger_debug.log", ios::app);
+    if (dbglog.is_open()) {
+        time_t now = time(nullptr);
+        char tbuf[64];
+        strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", localtime(&now));
+        // 将 wstring 转为 UTF-8
+        int n1 = WideCharToMultiByte(CP_UTF8, 0, loggerPath.c_str(), -1, NULL, 0, NULL, NULL);
+        string loggerPathUtf8(n1, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, loggerPath.c_str(), -1, &loggerPathUtf8[0], n1, NULL, NULL);
+        int n2 = WideCharToMultiByte(CP_UTF8, 0, cmdLine.c_str(), -1, NULL, 0, NULL, NULL);
+        string cmdLineUtf8(n2, '\0');
+        WideCharToMultiByte(CP_UTF8, 0, cmdLine.c_str(), -1, &cmdLineUtf8[0], n2, NULL, NULL);
+        dbglog << "[" << tbuf << "] loggerPath=" << loggerPathUtf8 << " cmdLine=" << cmdLineUtf8 << endl;
+        dbglog.close();
+    }
+
     // DETACHED_PROCESS: logger 不属于本控制台，Ctrl+C/关窗口不会杀死它
-    if (!CreateProcessW(NULL, &cmdLine[0], NULL, NULL, FALSE,
-                        DETACHED_PROCESS, NULL, NULL, &si, &pi))
+    if (!CreateProcessW(loggerPath.c_str(), cmdBuf.data(), NULL, NULL, FALSE,
+                        DETACHED_PROCESS, NULL, dir.c_str(), &si, &pi))
+    {
+        DWORD err = GetLastError();
+
+        // 尝试获取系统错误描述并写入诊断文件，便于在 VS 调试器中分析
+        LPWSTR msgBuf = NULL;
+        DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS;
+        DWORD lang = MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT);
+        FormatMessageW(flags, NULL, err, lang, (LPWSTR)&msgBuf, 0, NULL);
+
+        // 将错误信息转换为 UTF-8 narrow string
+        string errMsg = "";
+        if (msgBuf)
+        {
+            int needed = WideCharToMultiByte(CP_UTF8, 0, msgBuf, -1, NULL, 0, NULL, NULL);
+            if (needed > 0)
+            {
+                vector<char> buf(needed);
+                WideCharToMultiByte(CP_UTF8, 0, msgBuf, -1, buf.data(), needed, NULL, NULL);
+                errMsg = string(buf.data());
+            }
+            LocalFree(msgBuf);
+        }
+
+        // 写入诊断日志
+        ofstream errlog(".start_logger_error.log", ios::app);
+        if (errlog.is_open())
+        {
+            time_t now = time(nullptr);
+            char tbuf[64];
+            strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", localtime(&now));
+            errlog << "[" << tbuf << "] CreateProcessW failed, GetLastError=" << err;
+            if (!errMsg.empty()) errlog << " | " << errMsg;
+            errlog << endl;
+            errlog.close();
+        }
+
+        // 控制台也输出简单信息
+        wcout << L"[看门狗] CreateProcessW 启动 logger.exe 失败，GetLastError=" << err << endl;
         return false;
+    }
     hLoggerProcess = pi.hProcess;
     CloseHandle(pi.hThread);
     return true;
@@ -387,6 +472,35 @@ int main()
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
 
+    // 确保程序以管理员权限运行；如果当前未提升，则通过 ShellExecuteW 的 "runas" 重新以管理员身份启动以触发 UAC。
+    // This guarantees a UAC prompt when double-clicking the exe or launching from Explorer.
+    auto isElevated = []() -> bool {
+        BOOL elevated = FALSE;
+        HANDLE token = NULL;
+        if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
+            TOKEN_ELEVATION te = {0};
+            DWORD ret = 0;
+            if (GetTokenInformation(token, TokenElevation, &te, sizeof(te), &ret)) {
+                elevated = te.TokenIsElevated;
+            }
+            CloseHandle(token);
+        }
+        return elevated == TRUE;
+    };
+
+    if (!isElevated()) {
+        // 尝试以管理员权限重新启动自身
+        wchar_t exePath[MAX_PATH];
+        GetModuleFileNameW(NULL, exePath, MAX_PATH);
+        // Preserve current working directory and command-line arguments are not required here
+        HINSTANCE h = ShellExecuteW(NULL, L"runas", exePath, NULL, NULL, SW_SHOWNORMAL);
+        // 如果用户同意提升，新的提升进程会接替运行；当前非提升实例退出。
+        if ((INT_PTR)h > 32) {
+            return 0;
+        }
+        // 如果用户取消或提升失败，则继续以非管理员权限运行（避免死循环）。
+    }
+
     //启动时检查崩溃恢复
     bool recovered = checkAndRecoverCrash();
 
@@ -411,13 +525,13 @@ int main()
                 if (!(cin >> operation))
                 {
                     cin.clear();
-                    cin.ignore(32767, '\n');
+                    cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                     cout << "无效输入，请输入数字" << endl;
                     operation = -1;
                 }
                 else
                 {
-                    cin.ignore(32767, '\n');
+                    cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                 }
                 break;
             case 1:
@@ -489,13 +603,13 @@ int main()
                 if (!(cin >> operation))
                 {
                     cin.clear();
-                    cin.ignore(32767, '\n');
+                    cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                     cout << "无效输入，请输入数字" << endl;
                     operation = -1;
                 }
                 else
                 {
-                    cin.ignore(32767, '\n');
+                    cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                 }
                 break;
             case 1:
@@ -508,26 +622,33 @@ int main()
                         break;
                     add(tmpaddcin);
                 }
+                // 在 add() 内部已记录每次添加的日志，这里统一保存状态
                 saveState();
-                logOp("ADD", "total=" + to_string(Data.size()));
                 operation = -1;
                 break;
             case 2:
-                cout << "删除项的索引:";
-                if(!(cin >> idx))
+                cout << "连续删除, 输入exit退出" << endl;
+                while(true)
                 {
-                    cin.clear();
-                    cin.ignore(32767, '\n');
-                    cout << "无效的索引" << endl;
+                    cout << "删除项的索引:";
+                    string input;
+                    getline(cin, input);
+                    if(input == "exit")
+                        break;
+                    if(input.empty())
+                        continue;
+                    try {
+                        int didx = stoi(input);
+                        if(!pop(didx))
+                            cout << "索引超出范围" << endl;
+                        else
+                            ; // pop() 已在内部记录日志
+                    } catch(...) {
+                        cout << "无效的索引" << endl;
+                    }
                 }
-                else
-                {
-                    cin.ignore(32767, '\n');
-                    if(!pop(idx))
-                        cout << "索引超出范围" << endl;
-                }
+                // 删除操作已在 pop() 内部记录日志，统一保存状态
                 saveState();
-                logOp("DELETE", "index=" + to_string(idx));
                 operation = -1;
                 break;
             case 3:
@@ -535,17 +656,18 @@ int main()
                 if (!(cin >> idx))
                 {
                     cin.clear();
-                    cin.ignore(32767, '\n');
+                    cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                     cout << "无效的索引" << endl;
                     operation = -1;
                     break;
                 }
-                cin.ignore(32767, '\n');
+                cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                 cout << "新的数据:";
                 getline(cin, tmpaddcin);
-                mod(idx, tmpaddcin);
+                // mod() 内部会记录日志
+                if(!mod(idx, tmpaddcin))
+                    cout << "索引超出范围" << endl;
                 saveState();
-                logOp("MODIFY", "index=" + to_string(idx) + " new=" + tmpaddcin);
                 operation = -1;
                 break;
             case 4:

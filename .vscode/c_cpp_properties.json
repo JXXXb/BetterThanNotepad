@@ -10,10 +10,8 @@
                 "UNICODE",
                 "_UNICODE"
             ],
-            "intelliSenseMode": "windows-gcc-x64",
-            "cStandard": "c23",
-            "cppStandard": "c++26",
-            "compilerPath": "C:\\mingw64\\bin\\gcc.exe"
+            "windowsSdkVersion": "10.0.26100.0",
+            "intelliSenseMode": "windows-msvc-x64"
         }
     ],
     "version": 4
