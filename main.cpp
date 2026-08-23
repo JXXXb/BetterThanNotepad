@@ -3,6 +3,7 @@
 #include<string>
 #include<vector>
 #define NOMINMAX
+#define _CRT_SECURE_NO_WARNINGS
 #include<windows.h>
 #include<ctime>
 #include<mutex>

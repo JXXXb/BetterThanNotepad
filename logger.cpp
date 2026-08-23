@@ -5,6 +5,7 @@
 #include <ctime>
 #include <string>
 #define NOMINMAX
+#define _CRT_SECURE_NO_WARNINGS
 #include <windows.h>
 
 #ifdef _MSC_VER
