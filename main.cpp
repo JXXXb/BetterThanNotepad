@@ -279,14 +279,26 @@ void deleteState()
     DeleteFileA(STATE_FILE.c_str());
 }
 
+// 格式化为 "YYYY-MM-DD HH:MM:SS"(MSVC 下使用安全的 localtime_s)
+void formatNow(char *buf, size_t size)
+{
+    time_t now = time(nullptr);
+#ifdef _MSC_VER
+    struct tm tmbuf;
+    localtime_s(&tmbuf, &now);
+    strftime(buf, size, "%Y-%m-%d %H:%M:%S", &tmbuf);
+#else
+    strftime(buf, size, "%Y-%m-%d %H:%M:%S", localtime(&now));
+#endif
+}
+
 // === 将操作事件写入操作队列（logger.exe 会读取并记录）===
 void logOp(const string &action, const string &detail = "")
 {
     ofstream q(".opqueue.tmp", ios::app);
     if (!q.is_open()) return;
-    time_t now = time(nullptr);
     char buf[64];
-    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", localtime(&now));
+    formatNow(buf, sizeof(buf));
     q << "[" << buf << "] " << action;
     if (!detail.empty())
         q << " | " << detail;
@@ -318,9 +330,8 @@ bool startLoggerProcess()
     // 诊断：将即将执行的命令行与路径写入调试日志，便于在 VS 环境下追踪
     ofstream dbglog(".start_logger_debug.log", ios::app);
     if (dbglog.is_open()) {
-        time_t now = time(nullptr);
         char tbuf[64];
-        strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", localtime(&now));
+        formatNow(tbuf, sizeof(tbuf));
         // 将 wstring 转为 UTF-8
         int n1 = WideCharToMultiByte(CP_UTF8, 0, loggerPath.c_str(), -1, NULL, 0, NULL, NULL);
         string loggerPathUtf8(n1, '\0');
@@ -362,9 +373,8 @@ bool startLoggerProcess()
         ofstream errlog(".start_logger_error.log", ios::app);
         if (errlog.is_open())
         {
-            time_t now = time(nullptr);
             char tbuf[64];
-            strftime(tbuf, sizeof(tbuf), "%Y-%m-%d %H:%M:%S", localtime(&now));
+            formatNow(tbuf, sizeof(tbuf));
             errlog << "[" << tbuf << "] CreateProcessW failed, GetLastError=" << err;
             if (!errMsg.empty()) errlog << " | " << errMsg;
             errlog << endl;

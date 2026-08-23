@@ -20,12 +20,24 @@ const string OPQ_FILE     = ".opqueue.tmp";      // main.exe 写入的操作队�
 const string OPQ_PROC     = ".opqueue.proc";     // 处理中的队列副本
 const string MAINERROR_FILE = ".mainerror";      // 崩溃标记（供 main.exe 下次启动时触发恢复）
 
+// 格式化为 "YYYY-MM-DD HH:MM:SS"(MSVC 下使用安全的 localtime_s)
+void formatNow(char *buf, size_t size)
+{
+    time_t now = time(nullptr);
+#ifdef _MSC_VER
+    struct tm tmbuf;
+    localtime_s(&tmbuf, &now);
+    strftime(buf, size, "%Y-%m-%d %H:%M:%S", &tmbuf);
+#else
+    strftime(buf, size, "%Y-%m-%d %H:%M:%S", localtime(&now));
+#endif
+}
+
 //生成日志
 string nowStr()
 {
-    time_t now = time(nullptr);
     char buf[64];
-    strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", localtime(&now));
+    formatNow(buf, sizeof(buf));
     return string(buf);
 }
 
