@@ -21,22 +21,25 @@ supporting CRUD operations and file persistence. An external watchdog process
 - `logger.cpp` — Watchdog process: monitors main.exe, generates logs
 - `main.manifest` / `main_manifest.rc` — UAC manifest (requireAdministrator), embedded into main.exe
 - `CMakeLists.txt` — CMake build script
-- `build.bat` — One-click build helper (CMake + Ninja)
+- `build.bat` — One-click build helper (CMake + Ninja + MSVC)
+- `.vscode/settings.json` — VS Code CMake Tools configuration for VS2026 MSVC
 - `README.md` — This file
 
 ## Build
 
-Two build paths are used:
+Two build paths are supported:
 
 ### Local build (CMake)
 
-Requires CMake and a Developer Command Prompt (or vcvars64.bat in PATH):
+Requires Visual Studio 2026 with the Desktop C++ workload and CMake. `build.bat`
+automatically locates Visual Studio and loads its x64 MSVC environment, so it can
+be run from a normal terminal:
 
 ```bat
 build.bat
 ```
 
-Or manually:
+Or manually from a Visual Studio Developer Command Prompt:
 
 ```bat
 cmake -S . -B build -G "Ninja" -DCMAKE_BUILD_TYPE=Release
@@ -44,6 +47,8 @@ cmake --build build
 ```
 
 Binaries are written to `build/bin/Release/` (`main.exe` and `logger.exe`).
+For a Debug configuration, use `-DCMAKE_BUILD_TYPE=Debug`; binaries are then
+written to `build/bin/Debug/`.
 The Visual Studio solution (`BetterThanNotepad.sln`) can also be used.
 
 - Runtime library: `/MD` (`MultiThreadedDLL`)
@@ -80,7 +85,7 @@ Confirm to run. The program automatically launches logger.exe (also elevated).
 
 ## Auto-Save
 
-After entering a repository, data is automatically saved to the .txt file every
+After entering a repository, data is automatically saved to the `.stxt` file every
 20 seconds. No manual save needed.
 
 ## Crash Recovery Mechanism
@@ -147,6 +152,7 @@ operations are not.
 1. **Startup**: Choose operation mode
    - 1 — Load existing repository
    - 2 — Create new repository
+   - 3 — List repositories
 2. **Main menu**: Perform data management operations
 3. **Exit**: Auto-save data, delete `.repo_state.tmp`, then terminate logger.exe
 
@@ -164,7 +170,8 @@ operations are not.
 
 ## Storage Format
 
-- File format: .txt plain text
+- File format: `.stxt` plain text. The extension is custom, but the file contents
+   are ordinary text and are read and written using C++ file streams.
 - Data structure: one record per line, format `index@~data_content`
 - Example:
 
@@ -203,7 +210,7 @@ Transient / diagnostic files:
 
 ## Usage Notes
 
-- Repository names are used as typed; the .txt suffix is added automatically
+- Repository names are used as typed; the `.stxt` suffix is added automatically
 - Index is zero-based
 - If the repository already exists, the program prompts for overwrite
 - Auto-save every 20 seconds — no manual save required

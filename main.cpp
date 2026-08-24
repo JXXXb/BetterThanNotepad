@@ -181,7 +181,7 @@ bool write()
     if(currentRepoName.empty())
         return false;
 
-    ofstream out(currentRepoName + ".txt");
+    ofstream out(currentRepoName + ".stxt");
     if(!out.is_open())
     {
         return false;
@@ -197,8 +197,26 @@ bool write()
 //创建文件
 bool repositoryExists(const string &filename)
 {
-    ifstream in(filename + ".txt");
+    ifstream in(filename + ".stxt");
     return in.is_open();
+}
+
+//列出存储库
+string listRepo()
+{
+    string repoList;
+    WIN32_FIND_DATAA findData;
+    HANDLE hFind = FindFirstFileA("*.stxt", &findData);
+    if (hFind == INVALID_HANDLE_VALUE)
+        return repoList;
+    do
+    {
+        if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+            continue;
+        repoList += " " + string(findData.cFileName);
+    } while (FindNextFileA(hFind, &findData));
+    FindClose(hFind);
+    return repoList;
 }
 
 //读取存储库
@@ -207,7 +225,7 @@ bool loadRepo()
     string filename;
     cout << "输入要读取的存储库名：";
     getline(cin, filename);
-    ifstream in(filename + ".txt");
+    ifstream in(filename + ".stxt");
     if(!in.is_open())
         return false;
 
@@ -532,7 +550,7 @@ int main()
         switch(operation)
         {
             case -1:
-                cout << "选择操作:1.读取存储库, 2.新建存储库, 0.退出" << endl;
+                cout << "选择操作:1.读取存储库, 2.新建存储库, 3.列出存储库, 0.退出" << endl;
                 if (!(cin >> operation))
                 {
                     cin.clear();
@@ -557,7 +575,7 @@ int main()
                     cout << "读取失败" << endl;
                     operation = -1;
                 }
-                break;
+                break; 
             case 2:
                 if(createRepo())
                 {
@@ -570,6 +588,10 @@ int main()
                     operation = -1;
                 }
                 break;
+            case 3:
+                cout << "存储库列表:" << endl;
+                cout << listRepo() << endl;
+                operation = -1;
             default:
                 operation = -1;
                 break;
@@ -610,7 +632,7 @@ int main()
         switch(operation)
         {
             case -1:
-                cout << "选择操作:1.增加项, 2.删除项, 3.修改项, 4.查找项, 5.模糊查找, 6.读取存储库, 7.新建存储库, 0.退出, 8.列出所有项" << endl;
+                cout << "选择操作:1.增加项, 2.删除项, 3.修改项, 4.查找项, 5.模糊查找, 6.读取存储库, 7.新建存储库, 8.列出所有项, 0.退出," << endl;
                 if (!(cin >> operation))
                 {
                     cin.clear();
