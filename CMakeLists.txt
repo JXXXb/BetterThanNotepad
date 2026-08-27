@@ -1,4 +1,6 @@
-cmake_minimum_required(VERSION 3.8)
+# 3.15 为最低要求：使用了 MSVC_RUNTIME_LIBRARY 目标属性（CMake 3.15+ 引入）。
+# 低于 3.10 会在 CMake 4.x 触发 Deprecation 红字（"Compatibility with CMake < 3.10 will be removed"）。
+cmake_minimum_required(VERSION 3.15)
 project(RepoManager LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 11)

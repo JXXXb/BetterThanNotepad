@@ -25,7 +25,7 @@ std::mutex dataMutex;
 const string MAINERROR_FILE = ".mainerror";
 
 // 前置声明：将操作事件写入操作队列（logger.exe 会读取并记录）
-void logOp(const string &action, const string &detail);
+bool logOp(const string &action, const string &detail = "");
 
 //增加项函数
 bool add(string str)
@@ -34,9 +34,10 @@ bool add(string str)
     Data.push_back(str);
     // 记录操作日志：新增项，记录新索引和当前总数
     try {
-        logOp("ADD", "index=" + to_string((int)Data.size() - 1) + " total=" + to_string((int)Data.size()));
-    } catch(...) {}
-    return true;
+        return logOp("ADD", "index=" + to_string((int)Data.size() - 1) + " total=" + to_string((int)Data.size()));
+    } catch(...) {
+        return false;
+    }
 }
 
 //删除项函数
@@ -48,9 +49,10 @@ bool pop(int idx)
         Data.erase(Data.begin() + idx);
         // 记录操作日志：删除项，记录被删除的索引和删除后的总数
         try {
-            logOp("DELETE", "index=" + to_string(idx) + " total=" + to_string((int)Data.size()));
-        } catch(...) {}
-        return true;
+            return logOp("DELETE", "index=" + to_string(idx) + " total=" + to_string((int)Data.size()));
+        } catch(...) {
+            return false;
+        }
     }
     return false;
 }
@@ -64,9 +66,10 @@ bool mod(int idx, string str)
         Data[idx] = str;
         // 记录操作日志：修改项，记录索引与新值的简要信息
         try {
-            logOp("MODIFY", "index=" + to_string(idx) + " new=" + str);
-        } catch(...) {}
-        return true;
+            return logOp("MODIFY", "index=" + to_string(idx) + " new=" + str);
+        } catch(...) {
+            return false;
+        }
     }
     return false;
 }
@@ -116,7 +119,7 @@ std::atomic<bool> autoSaveRunning(false);
 std::thread loggerWatchThread;
 std::atomic<bool> loggerWatchRunning(false);
 
-void autoSaveFunc()
+bool autoSaveFunc()
 {
     while (autoSaveRunning.load())
     {
@@ -127,12 +130,14 @@ void autoSaveFunc()
         }
         if (!autoSaveRunning.load()) break;
         std::lock_guard<std::mutex> lock(dataMutex);
-        write();
+        if (!write())
+            return false;
     }
+    return true;
 }
 
 // main 端监控 logger.exe，挂了就重启
-void watchLoggerFunc()
+bool watchLoggerFunc()
 {
     while (loggerWatchRunning.load())
     {
@@ -156,6 +161,7 @@ void watchLoggerFunc()
                 cout << endl << "[看门狗] logger.exe 重启失败" << endl << "请继续输入：";
         }
     }
+    return true;
 }
 
 //列出所有项
@@ -247,7 +253,7 @@ bool loadRepo()
         Data.push_back(value);
     }
     in.close();
-    return true;
+    return logOp("LOAD_REPO", currentRepoName);
 }
 
 //创建存储库
@@ -276,53 +282,60 @@ bool createRepo()
     std::lock_guard<std::mutex> lock(dataMutex);
     vector<string>().swap(Data); //清空Data
     currentRepoName = filename;
-    write();
-    return true;
+    return write() && logOp("CREATE_REPO", currentRepoName);
 }
 
 //=== 状态文件：用于崩溃恢复 ===
-void saveState()
+bool saveState()
 {
-    if (currentRepoName.empty()) return;
+    if (currentRepoName.empty()) return false;
     std::lock_guard<std::mutex> lock(dataMutex);
     ofstream state(STATE_FILE);
-    if (!state.is_open()) return;
+    if (!state.is_open()) return false;
     state << currentRepoName << endl;
     for (const auto& item : Data)
         state << item << endl;
     state.close();
+    return state.good();
 }
 
-void deleteState()
+bool deleteState()
 {
-    DeleteFileA(STATE_FILE.c_str());
+    if (DeleteFileA(STATE_FILE.c_str()))
+        return true;
+    return GetLastError() == ERROR_FILE_NOT_FOUND;
 }
 
 // 格式化为 "YYYY-MM-DD HH:MM:SS"(MSVC 下使用安全的 localtime_s)
-void formatNow(char *buf, size_t size)
+bool formatNow(char *buf, size_t size)
 {
+    if (buf == nullptr || size == 0)
+        return false;
     time_t now = time(nullptr);
 #ifdef _MSC_VER
     struct tm tmbuf;
-    localtime_s(&tmbuf, &now);
-    strftime(buf, size, "%Y-%m-%d %H:%M:%S", &tmbuf);
+    if (localtime_s(&tmbuf, &now) != 0)
+        return false;
+    return strftime(buf, size, "%Y-%m-%d %H:%M:%S", &tmbuf) != 0;
 #else
-    strftime(buf, size, "%Y-%m-%d %H:%M:%S", localtime(&now));
+    struct tm *localTime = localtime(&now);
+    return localTime != nullptr && strftime(buf, size, "%Y-%m-%d %H:%M:%S", localTime) != 0;
 #endif
 }
 
 // === 将操作事件写入操作队列（logger.exe 会读取并记录）===
-void logOp(const string &action, const string &detail = "")
+bool logOp(const string &action, const string &detail)
 {
     ofstream q(".opqueue.tmp", ios::app);
-    if (!q.is_open()) return;
+    if (!q.is_open()) return false;
     char buf[64];
-    formatNow(buf, sizeof(buf));
+    if (!formatNow(buf, sizeof(buf))) return false;
     q << "[" << buf << "] " << action;
     if (!detail.empty())
         q << " | " << detail;
     q << endl;
     q.close();
+    return q.good();
 }
 
 // === 启动日志进程（看门狗，传入 main.exe 的 PID）===
@@ -410,8 +423,9 @@ bool startLoggerProcess()
 }
 
 // === 正常退出：停止日志进程并清理状态文件 ===
-void stopLogger()
+bool stopLogger()
 {
+    bool success = true;
     // 停止自动保存
     autoSaveRunning.store(false);
     if (autoSaveThread.joinable())
@@ -422,7 +436,7 @@ void stopLogger()
     if (loggerWatchThread.joinable())
         loggerWatchThread.join();
 
-    deleteState();  // 先删状态文件，这样 logger 判定为正常退出
+    success = deleteState();  // 先删状态文件，这样 logger 判定为正常退出
     if (hLoggerProcess != NULL)
     {
         TerminateProcess(hLoggerProcess, 0);
@@ -430,7 +444,18 @@ void stopLogger()
         hLoggerProcess = NULL;
     }
     // 清理可能残留的崩溃标记文件
-    DeleteFileA(MAINERROR_FILE.c_str());
+    if (!DeleteFileA(MAINERROR_FILE.c_str()) && GetLastError() != ERROR_FILE_NOT_FOUND)
+        success = false;
+    return success;
+}
+
+bool exitProgram()
+{
+    if (!logOp("EXIT", "saving " + to_string(Data.size()) + " items to " + currentRepoName))
+        return false;
+    if (!write())
+        return false;
+    return stopLogger();
 }
 
 // 返回 true 表示已恢复，可跳过存储库选择
@@ -496,38 +521,68 @@ bool checkAndRecoverCrash()
     return true;
 }
 
+// 检查当前进程是否已以管理员权限运行
+bool isElevatedProcess()
+{
+    BOOL elevated = FALSE;
+    HANDLE token = NULL;
+    if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token))
+    {
+        TOKEN_ELEVATION te = {0};
+        DWORD ret = 0;
+        if (GetTokenInformation(token, TokenElevation, &te, sizeof(te), &ret))
+            elevated = te.TokenIsElevated;
+        CloseHandle(token);
+    }
+    return elevated == TRUE;
+}
+
+// 以管理员权限重新启动自身（触发 UAC）
+// 返回 true 表示已成功启动新的提升实例，调用方应立即退出本（非提升）实例，
+// 否则本实例会与提升实例同时运行，导致出现两个进程、两个控制台。
+bool relaunchAsAdmin()
+{
+    wchar_t exePath[MAX_PATH];
+    GetModuleFileNameW(NULL, exePath, MAX_PATH);
+    HINSTANCE h = ShellExecuteW(NULL, L"runas", exePath, NULL, NULL, SW_SHOWNORMAL);
+    // ShellExecuteW 返回值 > 32 表示成功启动（SE_ERR_* 错误码均 <= 32）
+    return (INT_PTR)h > 32;
+}
+
 int main()
 {
+    //强制命令行字符为UTF_8
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
 
-    // 确保程序以管理员权限运行；如果当前未提升，则通过 ShellExecuteW 的 "runas" 重新以管理员身份启动以触发 UAC。
-    // This guarantees a UAC prompt when double-clicking the exe or launching from Explorer.
-    auto isElevated = []() -> bool {
-        BOOL elevated = FALSE;
-        HANDLE token = NULL;
-        if (OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) {
-            TOKEN_ELEVATION te = {0};
-            DWORD ret = 0;
-            if (GetTokenInformation(token, TokenElevation, &te, sizeof(te), &ret)) {
-                elevated = te.TokenIsElevated;
-            }
-            CloseHandle(token);
-        }
-        return elevated == TRUE;
-    };
+    //UAC提升权限：确保以管理员权限运行
+    while (true)
+    {
+        if (isElevatedProcess())
+            break;          // 已提升，本实例继续运行
 
-    if (!isElevated()) {
-        // 尝试以管理员权限重新启动自身
-        wchar_t exePath[MAX_PATH];
-        GetModuleFileNameW(NULL, exePath, MAX_PATH);
-        // Preserve current working directory and command-line arguments are not required here
-        HINSTANCE h = ShellExecuteW(NULL, L"runas", exePath, NULL, NULL, SW_SHOWNORMAL);
-        // 如果用户同意提升，新的提升进程会接替运行；当前非提升实例退出。
-        if ((INT_PTR)h > 32) {
-            return 0;
+        if (relaunchAsAdmin())
+            return 0;       // 已成功启动新的提升实例，本实例立即退出（修复两个控制台/两个进程）
+
+        // 提升失败或用户取消了 UAC：询问是否重试
+        cout << "UAC申请失败, 是否重试?(T/F)" << endl;
+        char isagain = '\0';
+        cin >> isagain;
+        if (isagain == 'T' || isagain == 't')
+        {
+            cout << "正在重试...";
+            continue;
         }
-        // 如果用户取消或提升失败，则继续以非管理员权限运行（避免死循环）。
+        else if (isagain == 'F' || isagain == 'f')
+        {
+            cout << "已放弃UAC";
+            break;
+        }
+        else
+        {
+            cout << "输入非法字符, 默认重试...";
+            continue;
+        }
     }
 
     //启动时检查崩溃恢复
@@ -608,7 +663,8 @@ int main()
     if (startLoggerProcess())
     {
         cout << "[看门狗] 日志进程已启动，崩溃保护已激活" << endl;
-        saveState();  // 写入初始状态
+        if (!saveState())
+            cout << "[看门狗] 初始状态保存失败" << endl;
     }
     else
     {
@@ -632,7 +688,7 @@ int main()
         switch(operation)
         {
             case -1:
-                cout << "选择操作:1.增加项, 2.删除项, 3.修改项, 4.查找项, 5.模糊查找, 6.读取存储库, 7.新建存储库, 8.列出所有项, 0.退出," << endl;
+                cout << "选择操作:1.增加项, 2.删除项, 3.修改项, 4.查找项, 5.模糊查找, 6.读取存储库, 7.新建存储库, 8.列出所有项, 9.列出存储库, 0.退出," << endl;
                 if (!(cin >> operation))
                 {
                     cin.clear();
@@ -653,10 +709,12 @@ int main()
                     getline(cin, tmpaddcin);
                     if(tmpaddcin == "exit")
                         break;
-                    add(tmpaddcin);
+                    if (!add(tmpaddcin))
+                        cout << "新增项成功，但日志记录失败" << endl;
                 }
                 // 在 add() 内部已记录每次添加的日志，这里统一保存状态
-                saveState();
+                if (!saveState())
+                    cout << "状态保存失败" << endl;
                 operation = -1;
                 break;
             case 2:
@@ -673,15 +731,15 @@ int main()
                     try {
                         int didx = stoi(input);
                         if(!pop(didx))
-                            cout << "索引超出范围" << endl;
-                        else
-                            ; // pop() 已在内部记录日志
+                            cout << "删除失败：索引超出范围或日志记录失败" << endl;
+                        // pop() 已在内部记录日志
                     } catch(...) {
                         cout << "无效的索引" << endl;
                     }
                 }
                 // 删除操作已在 pop() 内部记录日志，统一保存状态
-                saveState();
+                if (!saveState())
+                    cout << "状态保存失败" << endl;
                 operation = -1;
                 break;
             case 3:
@@ -699,8 +757,9 @@ int main()
                 getline(cin, tmpaddcin);
                 // mod() 内部会记录日志
                 if(!mod(idx, tmpaddcin))
-                    cout << "索引超出范围" << endl;
-                saveState();
+                    cout << "修改失败：索引超出范围或日志记录失败" << endl;
+                if (!saveState())
+                    cout << "状态保存失败" << endl;
                 operation = -1;
                 break;
             case 4:
@@ -720,12 +779,18 @@ int main()
                 operation = -1;
                 break;
             case 6:
+                if (!write())
+                {
+                    cout << "当前存储库写入失败，无法读取" << endl;
+                    operation = -1;
+                    break;
+                }
                 if(loadRepo())
                 {
                     cout << "读取成功" << endl;
                     cout << "当前存储库为: " << currentRepoName << endl;
-                    saveState();
-                    logOp("LOAD_REPO", currentRepoName);
+                    if (!saveState())
+                        cout << "存储库已读取，但状态或日志记录失败" << endl;
                     operation = -1;
                 }
                 else
@@ -736,11 +801,17 @@ int main()
                 }
                 break;
             case 7:
+                if (!write())
+                {
+                    cout << "当前存储库写入失败，无法新建" << endl;
+                    operation = -1;
+                    break;
+                }
                 if(createRepo())
                 {
                     cout << "已创建并切换到存储库: " << currentRepoName << endl;
-                    saveState();
-                    logOp("CREATE_REPO", currentRepoName);
+                    if (!saveState())
+                        cout << "存储库已创建，但状态或日志记录失败" << endl;
                 }
                 else
                 {
@@ -752,24 +823,26 @@ int main()
                 listItems();
                 operation = -1;
                 break;
+            case 9:
+                cout << "存储库列表:" << endl;
+                cout << listRepo() << endl;
+                operation = -1;
+                break;
             case 0:
-                logOp("EXIT", "saving " + to_string(Data.size()) + " items to " + currentRepoName);
                 //正常写入并退出 
                 while(true)
                 {
-                    bool result = write();
+                    bool result = exitProgram();
                     if(result)
                     {
                         cout << Data.size() << "  已写入" << endl;
-                        //正常退出：停止日志进程
-                        stopLogger();
                         return 0;
                     }
                     else
                     {
                         cout << "写入文件失败，正在重写" << endl;
+                        continue;
                     }
-                    continue;
                 }
                 break;
             default:
