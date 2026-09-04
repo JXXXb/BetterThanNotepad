@@ -44,12 +44,12 @@ jobs:
       - name: 编译 logger.exe
         shell: cmd
         run: |
-          cl /nologo /W3 /O2 /EHsc /utf-8 /MT /DWIN32 /DNDEBUG /D_CONSOLE /DUNICODE /D_UNICODE logger.cpp logger.res /Fe:logger.exe /link /SUBSYSTEM:CONSOLE /MANIFEST:NO advapi32.lib shell32.lib
+          cl /nologo /W3 /O2 /EHsc /utf-8 /std:c++latest /MT /DWIN32 /DNDEBUG /D_CONSOLE /DUNICODE /D_UNICODE logger.cpp logger.res /Fe:logger.exe /link /SUBSYSTEM:CONSOLE /MANIFEST:NO advapi32.lib shell32.lib
 
       - name: 编译 main.exe
         shell: cmd
         run: |
-          cl /nologo /W3 /O2 /EHsc /utf-8 /MT /DWIN32 /DNDEBUG /D_CONSOLE /DUNICODE /D_UNICODE main.cpp main.res /Fe:main.exe /link /SUBSYSTEM:CONSOLE /MANIFEST:NO advapi32.lib shell32.lib
+          cl /nologo /W3 /O2 /EHsc /utf-8 /std:c++latest /MT /DWIN32 /DNDEBUG /D_CONSOLE /DUNICODE /D_UNICODE main.cpp main.res /Fe:main.exe /link /SUBSYSTEM:CONSOLE /MANIFEST:NO advapi32.lib shell32.lib
 
       - name: 计算下一个版本号
         id: version
@@ -144,7 +144,7 @@ jobs:
 
           ### 🛠️ 构建信息
           - 编译器: MSVC (cl.exe / Visual Studio 2022, v143)
-          - 标准: C++11
+          - 标准: C++23（MSVC 由 /std:c++latest 提供，CMake/GCC 使用 -std=c++23）
           - 链接: 静态链接 (/MT)"
 
           echo "已发布 Release: $TAG"

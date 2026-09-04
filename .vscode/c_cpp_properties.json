@@ -14,7 +14,7 @@
             "windowsSdkVersion": "10.0.26100.0",
             "intelliSenseMode": "windows-msvc-x64",
             "compilerPath": "C:/Program Files/Microsoft Visual Studio/18/Community/VC/Tools/MSVC/14.51.36231/bin/Hostx64/x64/cl.exe",
-            "cppStandard": "c++26"
+            "cppStandard": "c++23"
         }
     ],
     "version": 4

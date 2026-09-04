@@ -1,41 +1,70 @@
-# 3.15 为最低要求：使用了 MSVC_RUNTIME_LIBRARY 目标属性（CMake 3.15+ 引入）。
-# 低于 3.10 会在 CMake 4.x 触发 Deprecation 红字（"Compatibility with CMake < 3.10 will be removed"）。
 cmake_minimum_required(VERSION 3.15)
 project(RepoManager LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 11)
+# 1. 设置 C++ 标准（CMake 会自动传递给 MSVC）
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 源文件
+# 2. 创建目标（必须在使用 target_compile_options 之前）
 add_executable(main main.cpp main_manifest.rc)
 add_executable(logger logger.cpp)
 
-# Default output directories
+# 3. 设置输出目录
 set_target_properties(main PROPERTIES
-	RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/$<CONFIG>"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/$<CONFIG>"
 )
 set_target_properties(logger PROPERTIES
-	RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/$<CONFIG>"
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/$<CONFIG>"
 )
 
+# 4. 编译器专用配置
 if(MSVC)
-	# 使用 UTF-8 源编码并启用 MSVC 异常处理（与 Visual Studio 默认一致）
-	target_compile_options(main PRIVATE /utf-8 /EHsc)
-	target_compile_options(logger PRIVATE /utf-8 /EHsc)
+    # 强制启用 C++17/20 特性宏
+    add_compile_definitions(
+        _HAS_CXX17=1
+        _HAS_CXX20=1
+        _SILENCE_ALL_CXX17_DEPRECATION_WARNINGS
+    )
+    
+    # 基础编译选项（所有配置）
+    target_compile_options(main PRIVATE
+        /Zc:__cplusplus     # 让 __cplusplus 宏报告正确值
+        /permissive-        # 严格标准一致性
+        /utf-8              # UTF-8 编码
+        /EHsc               # C++ 异常处理
+    )
+    target_compile_options(logger PRIVATE
+        /Zc:__cplusplus
+        /permissive-
+        /utf-8
+        /EHsc
+    )
+    
+    # Release 优化（完整保留你的 /O2 和 /GL）
+    target_compile_options(main PRIVATE
+        $<$<CONFIG:Release>:/O2>
+        $<$<CONFIG:Release>:/GL>
+    )
+    target_compile_options(logger PRIVATE
+        $<$<CONFIG:Release>:/O2>
+        $<$<CONFIG:Release>:/GL>
+    )
+    
+    # 运行时库（动态链接 CRT）
+    set_property(TARGET main PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+    set_property(TARGET logger PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
 
-	# 仅在 Release 配置下启用 /O2（/O2 与 Debug 的 /RTC1 不兼容，无条件添加会导致 Debug 构建失败）
-	target_compile_options(main PRIVATE $<$<CONFIG:Release>:/O2>)
-	target_compile_options(logger PRIVATE $<$<CONFIG:Release>:/O2>)
-
-	# 使用 DLL CRT（动态链接运行时库）以匹配 Visual Studio 的运行时环境并避免 side-by-side 清单问题
-	# 可用值示例: MultiThreadedDLL, MultiThreadedDebugDLL 等
-	set_property(TARGET main PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
-	set_property(TARGET logger PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
-
-	# main 的 manifest 已通过将 main_manifest.rc 添加到 add_executable 的源列表来嵌入
-	# 在此处避免重复添加以免导致 CMake 重复配置或报错
 else()
-	# best-effort for non-MSVC toolchains on Windows (e.g., MinGW)
-	target_compile_options(main PRIVATE -O2)
-	target_compile_options(logger PRIVATE -O2)
+    # 非 MSVC 工具链（如 MinGW/GCC/Clang on Windows）
+    # /O2 对应 -O2，/GL 对应 -flto（链接时优化）
+    target_compile_options(main PRIVATE
+        -std=c++23
+        $<$<CONFIG:Release>:-O2>
+        $<$<CONFIG:Release>:-flto>
+    )
+    target_compile_options(logger PRIVATE
+        -std=c++23
+        $<$<CONFIG:Release>:-O2>
+        $<$<CONFIG:Release>:-flto>
+    )
 endif()

@@ -1,4 +1,4 @@
-﻿#include<iostream>
+#include<iostream>
 #include<fstream>
 #include<string>
 #include<vector>
@@ -11,12 +11,26 @@
 #include<atomic>
 #include<chrono>
 #include<limits>
+#include<filesystem>
+#include<iomanip>
 
 #ifdef _MSC_VER
 #pragma execution_character_set("utf-8")
 #endif
 
-using namespace std;
+using std::cin;
+using std::cout;
+using std::string;
+using std::vector;
+using std::to_string;
+using std::endl;
+using std::wstring;
+using std::wcout;
+using std::to_wstring;
+using std::ofstream;
+using std::ios;
+using std::ifstream;
+namespace fs = std::filesystem;
 
 vector<string> Data;
 
@@ -27,57 +41,56 @@ const string MAINERROR_FILE = ".mainerror";
 // 前置声明：将操作事件写入操作队列（logger.exe 会读取并记录）
 bool logOp(const string &action, const string &detail = "");
 
-//增加项函数
+// 前置声明：刷新崩溃恢复状态文件（add/pop/mod 每次变更后调用）
+bool saveState();
+
+//增加项函数：数据变更后同步刷新操作队列与崩溃恢复状态（均为尽力而为）
 bool add(string str)
 {
-    std::lock_guard<std::mutex> lock(dataMutex);
-    Data.push_back(str);
-    // 记录操作日志：新增项，记录新索引和当前总数
-    try {
-        return logOp("ADD", "index=" + to_string((int)Data.size() - 1) + " total=" + to_string((int)Data.size()));
-    } catch(...) {
-        return false;
+    int idx = 0;
+    {
+        std::lock_guard<std::mutex> lock(dataMutex);
+        Data.push_back(str);
+        idx = (int)Data.size() - 1;
     }
+    logOp("ADD", "index=" + to_string(idx) + " total=" + to_string((int)Data.size()));
+    saveState();
+    return true;
 }
 
 //删除项函数
 bool pop(int idx)
 {
-    std::lock_guard<std::mutex> lock(dataMutex);
-    if(idx >= 0 && idx < Data.size())
     {
-        Data.erase(Data.begin() + idx);
-        // 记录操作日志：删除项，记录被删除的索引和删除后的总数
-        try {
-            return logOp("DELETE", "index=" + to_string(idx) + " total=" + to_string((int)Data.size()));
-        } catch(...) {
+        std::lock_guard<std::mutex> lock(dataMutex);
+        if (idx < 0 || idx >= (int)Data.size())
             return false;
-        }
+        Data.erase(Data.begin() + idx);
     }
-    return false;
+    logOp("DELETE", "index=" + to_string(idx) + " total=" + to_string((int)Data.size()));
+    saveState();
+    return true;
 }
 
 //修改项函数
 bool mod(int idx, string str)
 {
-    std::lock_guard<std::mutex> lock(dataMutex);
-    if(idx >= 0 && idx < Data.size())
     {
-        Data[idx] = str;
-        // 记录操作日志：修改项，记录索引与新值的简要信息
-        try {
-            return logOp("MODIFY", "index=" + to_string(idx) + " new=" + str);
-        } catch(...) {
+        std::lock_guard<std::mutex> lock(dataMutex);
+        if (idx < 0 || idx >= (int)Data.size())
             return false;
-        }
+        Data[idx] = str;
     }
-    return false;
+    logOp("MODIFY", "index=" + to_string(idx) + " new=" + str);
+    saveState();
+    return true;
 }
 
-//查找项函数
+//查找项函数：返回第一个包含关键字的项的下标，未找到返回 -1（加锁）
 int find(string str)
 {
-    for(int i = 0; i < Data.size(); i++)
+    std::lock_guard<std::mutex> lock(dataMutex);
+    for (int i = 0; i < (int)Data.size(); i++)
     {
         if (Data[i].find(str) != std::string::npos)//Data[i]包含str
         {
@@ -87,17 +100,29 @@ int find(string str)
     return -1;
 }
 
-//模糊查找项函数
-int find_fuzzy(string str)
+//模糊查找：返回所有包含关键字的下标（加锁、无副作用、按索引升序）。
+// 修复：旧 find_fuzzy 只打印第一条就 return，无法展示全部匹配。
+std::vector<int> fuzzyMatches(const string &key)
 {
-    for(int i = 0; i < Data.size(); i++)
+    std::lock_guard<std::mutex> lock(dataMutex);
+    std::vector<int> hits;
+    for (int i = 0; i < (int)Data.size(); i++)
     {
-        if (Data[i].find(str) != std::string::npos)//Data[i]包含str
-        {
-            cout << "索引为: " << i << " 原文为:" << Data[i] << endl;
-        }
+        if (Data[i].find(key) != std::string::npos)
+            hits.push_back(i);
     }
-    return -1;
+    return hits;
+}
+
+//打印匹配列表：带 1..N 序号，便于后续按序号选择删除
+void printMatchList(const std::vector<int> &hits)
+{
+    std::lock_guard<std::mutex> lock(dataMutex);
+    for (size_t i = 0; i < hits.size(); i++)
+    {
+        cout << "  匹配 " << (i + 1) << ": 索引 " << hits[i]
+             << "  原文: " << Data[hits[i]] << endl;
+    }
 }
 
 string currentRepoName = "";
@@ -118,6 +143,73 @@ std::atomic<bool> autoSaveRunning(false);
 // main 监控 logger 是否存活，挂了就自动重启
 std::thread loggerWatchThread;
 std::atomic<bool> loggerWatchRunning(false);
+
+// 将用户输入解析为索引：只接受十进制数字（允许首尾空白）。
+// 负数/非数字一律返回 false（不再发生 “-1 → erase(begin()-1)” 这类越界崩溃）。
+bool tryParseInt(const string &s, int &out)
+{
+    if (s.empty()) return false;
+    size_t b = s.find_first_not_of(" \t");
+    if (b == string::npos) return false;
+    size_t e = s.find_last_not_of(" \t");
+    string t = s.substr(b, e - b + 1);
+    if (t.empty()) return false;
+
+    size_t i = 0;
+    if (t[0] == '+')
+    {
+        if (t.size() == 1) return false;
+        i = 1;
+    }
+    else if (t[0] == '-')
+    {
+        return false;   // 索引不允许为负
+    }
+
+    long long v = 0;
+    for (; i < t.size(); i++)
+    {
+        if (t[i] < '0' || t[i] > '9') return false;
+        v = v * 10 + (t[i] - '0');
+        if (v > (long long)std::numeric_limits<int>::max()) return false; // 防溢出
+    }
+    out = (int)v;
+    return true;
+}
+
+// 加锁保存到当前存储库 .stxt（write 的加锁版本）。
+// 注意：调用方不得再持有 dataMutex，否则会死锁。
+bool saveRepo()
+{
+    std::lock_guard<std::mutex> lock(dataMutex);
+    return write();
+}
+
+// === 统计当前存储库信息（主菜单 10，新功能）===
+void showStats()
+{
+    std::lock_guard<std::mutex> lock(dataMutex);
+    if (Data.empty())
+    {
+        cout << "当前存储库为空，暂无统计信息" << endl;
+        return;
+    }
+    size_t totalChars = 0;
+    size_t longest = 0, shortest = 0;
+    for (size_t i = 0; i < Data.size(); i++)
+    {
+        totalChars += Data[i].size();
+        if (Data[i].size() > Data[longest].size())  longest  = i;
+        if (Data[i].size() < Data[shortest].size()) shortest = i;
+    }
+    double avg = (double)totalChars / (double)Data.size();
+    cout << "存储库: " << currentRepoName << endl;
+    cout << "条目总数: " << Data.size() << endl;
+    cout << "字符总数(不含索引前缀): " << totalChars << endl;
+    cout << std::fixed << std::setprecision(1) << "平均每条字符数: " << avg << std::setprecision(0) << endl;
+    cout << "最长条目: 索引 " << longest  << " (" << Data[longest].size()  << " 字符) " << Data[longest]  << endl;
+    cout << "最短条目: 索引 " << shortest << " (" << Data[shortest].size() << " 字符) " << Data[shortest] << endl;
+}
 
 bool autoSaveFunc()
 {
@@ -187,7 +279,7 @@ bool write()
     if(currentRepoName.empty())
         return false;
 
-    ofstream out(currentRepoName + ".stxt");
+    std::ofstream out(currentRepoName + ".stxt");
     if(!out.is_open())
     {
         return false;
@@ -203,7 +295,7 @@ bool write()
 //创建文件
 bool repositoryExists(const string &filename)
 {
-    ifstream in(filename + ".stxt");
+    std::ifstream in(filename + ".stxt");
     return in.is_open();
 }
 
@@ -219,7 +311,9 @@ string listRepo()
     {
         if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
             continue;
-        repoList += " " + string(findData.cFileName);
+        if (!repoList.empty())
+            repoList += "\n";
+        repoList += string(findData.cFileName);
     } while (FindNextFileA(hFind, &findData));
     FindClose(hFind);
     return repoList;
@@ -230,8 +324,13 @@ bool loadRepo()
 {
     string filename;
     cout << "输入要读取的存储库名：";
-    getline(cin, filename);
-    ifstream in(filename + ".stxt");
+    std::getline(cin, filename);
+    if (filename.empty())
+    {
+        cout << "名称为空，未读取任何存储库" << endl;
+        return false;
+    }
+    std::ifstream in(filename + ".stxt");
     if(!in.is_open())
         return false;
 
@@ -240,7 +339,7 @@ bool loadRepo()
     currentRepoName = filename;
 
     string line;
-    while(getline(in, line))
+    while(std::getline(in, line))
     {
         if(line.empty())
             continue;
@@ -263,7 +362,7 @@ bool createRepo()
     while(true)
     {
         cout << "输入新建存储库名：";
-        getline(cin, filename);
+        std::getline(cin, filename);
         if(filename.empty())
             return false;
         if(repositoryExists(filename))
@@ -283,6 +382,30 @@ bool createRepo()
     vector<string>().swap(Data); //清空Data
     currentRepoName = filename;
     return write() && logOp("CREATE_REPO", currentRepoName);
+}
+
+//删除存储库
+bool deleteRepo(string filename)
+{
+    string filepath = filename + ".stxt";
+    if (fs::exists(filepath))
+    {
+        if (fs::remove(filepath))
+        {
+                std::cout << "文件删除成功！" << std::endl;
+                return 1;
+        }
+        else
+        {
+            std::cout << "文件存在，但删除失败（可能被占用或无权限）" << std::endl;
+            return 0;
+        }
+    }
+    else
+    {
+        std::cout << "文件不存在" << std::endl;
+        return 0;
+    }
 }
 
 //=== 状态文件：用于崩溃恢复 ===
@@ -326,7 +449,7 @@ bool formatNow(char *buf, size_t size)
 // === 将操作事件写入操作队列（logger.exe 会读取并记录）===
 bool logOp(const string &action, const string &detail)
 {
-    ofstream q(".opqueue.tmp", ios::app);
+    std::ofstream q(".opqueue.tmp", ios::app);
     if (!q.is_open()) return false;
     char buf[64];
     if (!formatNow(buf, sizeof(buf))) return false;
@@ -449,14 +572,8 @@ bool stopLogger()
     return success;
 }
 
-bool exitProgram()
-{
-    if (!logOp("EXIT", "saving " + to_string(Data.size()) + " items to " + currentRepoName))
-        return false;
-    if (!write())
-        return false;
-    return stopLogger();
-}
+// 退出逻辑已内联到主菜单 case 0（带失败重试与用户选择，避免死循环）。
+// bool exitProgram() 已移除，见 case 0。
 
 // 返回 true 表示已恢复，可跳过存储库选择
 bool checkAndRecoverCrash()
@@ -492,7 +609,7 @@ bool checkAndRecoverCrash()
     }
 
     string repoName;
-    if (!getline(stateFile, repoName) || repoName.empty())
+    if (!std::getline(stateFile, repoName) || repoName.empty())
     {
         cout << "状态文件损坏（无存储库名），无法恢复。" << endl;
         stateFile.close();
@@ -505,15 +622,15 @@ bool checkAndRecoverCrash()
     currentRepoName = repoName;
 
     string line;
-    while (getline(stateFile, line))
+    while (std::getline(stateFile, line))
     {
         if (!line.empty())
             Data.push_back(line);
     }
     stateFile.close();
 
-    // 立即执行 write 将恢复的数据写入正常存储文件
-    if (write())
+    // 立即执行 write 将恢复的数据写入正常存储文件（此刻线程未启动，加锁无冲突）
+    if (saveRepo())
         cout << "已恢复 " << Data.size() << " 条数据到存储库" << endl;
     else
         cout << "恢复写入失败，数据保留在内存中" << endl;
@@ -555,7 +672,10 @@ int main()
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
 
-    //UAC提升权限：确保以管理员权限运行
+    //UAC提升权限：确保以管理员权限运行。
+    // 定义 BTN_TEST_MODE 编译宏（仅自动化测试用）时跳过 UAC，方便无人值守运行；
+    // 默认生产构建不受影响，仍会请求管理员权限。
+#ifndef BTN_TEST_MODE
     while (true)
     {
         if (isElevatedProcess())
@@ -584,6 +704,9 @@ int main()
             continue;
         }
     }
+#else
+    cout << "[测试模式] BTN_TEST_MODE 已定义，跳过 UAC 提权" << endl;
+#endif
 
     //启动时检查崩溃恢复
     bool recovered = checkAndRecoverCrash();
@@ -605,7 +728,7 @@ int main()
         switch(operation)
         {
             case -1:
-                cout << "选择操作:1.读取存储库, 2.新建存储库, 3.列出存储库, 0.退出" << endl;
+                cout << "选择操作:1.读取存储库, 2.新建存储库, 3.列出存储库, 4.删除存储库, 0.退出" << endl << ">";
                 if (!(cin >> operation))
                 {
                     cin.clear();
@@ -647,6 +770,24 @@ int main()
                 cout << "存储库列表:" << endl;
                 cout << listRepo() << endl;
                 operation = -1;
+                break;
+            case 4:
+            {
+                // 修复：旧逻辑删除失败后卡在 “是否重试” 无限循环，且完成后无法返回菜单。
+                // 现在一次只处理一个名字，完成后总是回到菜单。
+                cout << "请输入要删除的存储库名称（输入 exit 或直接回车返回菜单）:" << endl << ">";
+                string deleteReponame = "";
+                std::getline(cin, deleteReponame);
+                if (deleteReponame.empty() || deleteReponame == "exit")
+                {
+                    cout << "已取消删除" << endl;
+                    operation = -1;
+                    break;
+                }
+                deleteRepo(deleteReponame);   // 内部会打印成功/失败原因
+                operation = -1;
+                break;
+            }
             default:
                 operation = -1;
                 break;
@@ -688,7 +829,7 @@ int main()
         switch(operation)
         {
             case -1:
-                cout << "选择操作:1.增加项, 2.删除项, 3.修改项, 4.查找项, 5.模糊查找, 6.读取存储库, 7.新建存储库, 8.列出所有项, 9.列出存储库, 0.退出," << endl;
+                cout << "选择操作:1.增加项, 2.删除项, 3.修改项, 4.查找项, 5.模糊查找, 6.读取存储库, 7.新建存储库, 8.列出所有项, 9.列出存储库, 10.统计信息, 0.退出," << endl << ">";
                 if (!(cin >> operation))
                 {
                     cin.clear();
@@ -702,44 +843,104 @@ int main()
                 }
                 break;
             case 1:
-                cout << "连续写入,输入exit退出" << endl;
+                cout << "连续写入, 输入 exit 结束" << endl;
                 while(true)
                 {
                     cout << "添加数据:";
-                    getline(cin, tmpaddcin);
+                    std::getline(cin, tmpaddcin);
                     if(tmpaddcin == "exit")
                         break;
+                    if(tmpaddcin.empty())
+                    {
+                        cout << "（空行已忽略，输入 exit 结束）" << endl;
+                        continue;
+                    }
                     if (!add(tmpaddcin))
-                        cout << "新增项成功，但日志记录失败" << endl;
+                        cout << "添加失败" << endl;
                 }
-                // 在 add() 内部已记录每次添加的日志，这里统一保存状态
-                if (!saveState())
-                    cout << "状态保存失败" << endl;
                 operation = -1;
                 break;
             case 2:
-                cout << "连续删除, 输入exit退出" << endl;
+                // 修复：旧实现只取首字符当索引（“12”会删第 1 条）、负号/越界会触发
+                // Data.erase(begin()±n) 越界（未定义行为/崩溃），且直接改 Data 绕过了
+                // pop() 的加锁与操作日志。现在：纯数字按完整索引删除；否则按内容
+                // 查找，列出全部匹配后由用户确认，绝不删除未匹配到的项。
+                cout << "连续删除：输入索引或内容，输入 exit 结束" << endl;
                 while(true)
                 {
-                    cout << "删除项的索引:";
+                    cout << "删除:";
                     string input;
-                    getline(cin, input);
+                    std::getline(cin, input);
                     if(input == "exit")
                         break;
                     if(input.empty())
                         continue;
-                    try {
-                        int didx = stoi(input);
-                        if(!pop(didx))
-                            cout << "删除失败：索引超出范围或日志记录失败" << endl;
-                        // pop() 已在内部记录日志
-                    } catch(...) {
-                        cout << "无效的索引" << endl;
+
+                    int didx = -1;
+                    if (tryParseInt(input, didx))
+                    {
+                        if (pop(didx))
+                            cout << "已删除索引 " << didx << " 的项，剩余 " << Data.size() << " 条" << endl;
+                        else
+                            cout << "索引 " << didx << " 超出范围（当前共 " << Data.size()
+                                 << " 条，索引 0.." << (Data.empty() ? 0 : (int)Data.size() - 1) << "）" << endl;
+                        continue;
+                    }
+
+                    // 不是合法索引 → 按内容查找，确认后删除
+                    vector<int> hits = fuzzyMatches(input);
+                    if (hits.empty())
+                    {
+                        cout << "未找到包含 \"" << input << "\" 的项，未删除任何数据" << endl;
+                        continue;
+                    }
+                    printMatchList(hits);
+                    if (hits.size() == 1)
+                    {
+                        while(true)
+                        {
+                            cout << "是否删除以上匹配项？T=删除 F=取消:";
+                            string ans;
+                            std::getline(cin, ans);
+                            if (ans == "T" || ans == "t" || ans == "y" || ans == "Y")
+                            {
+                                pop(hits[0]);
+                                cout << "已删除索引 " << hits[0] << " 的项，剩余 " << Data.size() << " 条" << endl;
+                                break;
+                            }
+                            if (ans == "F" || ans == "f" || ans == "n" || ans == "N")
+                            {
+                                cout << "已取消删除" << endl;
+                                break;
+                            }
+                            cout << "无效输入，请输入 T 或 F" << endl;
+                        }
+                    }
+                    else
+                    {
+                        while(true)
+                        {
+                            cout << "有多个匹配，输入要删除的匹配序号(1.." << hits.size()
+                                 << ")，或输入 F 取消:";
+                            string ans;
+                            std::getline(cin, ans);
+                            int sel = -1;
+                            if (tryParseInt(ans, sel) && sel >= 1 && sel <= (int)hits.size())
+                            {
+                                int target = hits[sel - 1];
+                                pop(target);
+                                cout << "已删除索引 " << target << " 的项，剩余 " << Data.size() << " 条" << endl;
+                                break;
+                            }
+                            if (ans == "F" || ans == "f" || ans == "n" || ans == "N")
+                            {
+                                cout << "已取消删除" << endl;
+                                break;
+                            }
+                            cout << "无效输入，请输入 1.." << hits.size() << " 或 F" << endl;
+                        }
                     }
                 }
-                // 删除操作已在 pop() 内部记录日志，统一保存状态
-                if (!saveState())
-                    cout << "状态保存失败" << endl;
                 operation = -1;
                 break;
             case 3:
@@ -753,33 +954,66 @@ int main()
                     break;
                 }
                 cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                if (idx < 0)
+                {
+                    cout << "索引不能为负数" << endl;
+                    operation = -1;
+                    break;
+                }
                 cout << "新的数据:";
-                getline(cin, tmpaddcin);
-                // mod() 内部会记录日志
+                std::getline(cin, tmpaddcin);
+                if (tmpaddcin.empty())
+                {
+                    cout << "内容为空，未修改" << endl;
+                    operation = -1;
+                    break;
+                }
                 if(!mod(idx, tmpaddcin))
-                    cout << "修改失败：索引超出范围或日志记录失败" << endl;
-                if (!saveState())
-                    cout << "状态保存失败" << endl;
+                    cout << "修改失败：索引 " << idx << " 超出范围（当前共 " << Data.size() << " 条）" << endl;
+                else
+                    cout << "已修改索引 " << idx << " 的项" << endl;
                 operation = -1;
                 break;
             case 4:
-                cout << "查找数据索引:";
-                getline(cin, str);
+                cout << "输入要查找的内容:";
+                std::getline(cin, str);
+                if (str.empty())
+                {
+                    cout << "内容为空，未查找" << endl;
+                    operation = -1;
+                    break;
+                }
                 idx = find(str);
                 if(idx != -1)
-                    cout << "原文为:" << Data[idx] << endl;
+                    cout << "索引: " << idx << "  原文: " << Data[idx] << endl;
                 else
-                    cout << "未找到" << endl;
+                    cout << "未找到包含 \"" << str << "\" 的项" << endl;
                 operation = -1;
                 break;
             case 5:
-                cout << "模糊查找数据:";
-                getline(cin, str);
-                find_fuzzy(str);
+                cout << "模糊查找（显示所有匹配项），输入要查找的内容:";
+                std::getline(cin, str);
+                if (str.empty())
+                {
+                    cout << "内容为空，未查找" << endl;
+                    operation = -1;
+                    break;
+                }
+                // 修复：旧 find_fuzzy 只打印第一条匹配；现在展示全部匹配并给出数量。
+                {
+                    vector<int> hits = fuzzyMatches(str);
+                    if (hits.empty())
+                        cout << "未找到包含 \"" << str << "\" 的项" << endl;
+                    else
+                    {
+                        cout << "共找到 " << hits.size() << " 条匹配:" << endl;
+                        printMatchList(hits);
+                    }
+                }
                 operation = -1;
                 break;
             case 6:
-                if (!write())
+                if (!saveRepo())
                 {
                     cout << "当前存储库写入失败，无法读取" << endl;
                     operation = -1;
@@ -801,7 +1035,7 @@ int main()
                 }
                 break;
             case 7:
-                if (!write())
+                if (!saveRepo())
                 {
                     cout << "当前存储库写入失败，无法新建" << endl;
                     operation = -1;
@@ -828,23 +1062,65 @@ int main()
                 cout << listRepo() << endl;
                 operation = -1;
                 break;
-            case 0:
-                //正常写入并退出 
-                while(true)
-                {
-                    bool result = exitProgram();
-                    if(result)
-                    {
-                        cout << Data.size() << "  已写入" << endl;
-                        return 0;
-                    }
-                    else
-                    {
-                        cout << "写入文件失败，正在重写" << endl;
-                        continue;
-                    }
-                }
+            case 10:
+                showStats();
+                operation = -1;
                 break;
+            case 0:
+                // 退出：先保存，再停止看门狗。
+                // 修复：旧实现 while(true) 中保存失败会无限 “正在重写” 死循环；
+                // 现在失败 3 次后由用户明确选择（重试 / 放弃退出 / 返回菜单）。
+                logOp("EXIT", "saving " + to_string(Data.size()) + " items to " + currentRepoName);
+                {
+                    bool saved = false;
+                    for (int attempt = 1; attempt <= 3 && !saved; attempt++)
+                    {
+                        saved = saveRepo();
+                        if (!saved)
+                        {
+                            cout << "第 " << attempt << " 次保存 " << currentRepoName << ".stxt 失败";
+                            if (attempt < 3)
+                            {
+                                cout << "，稍后自动重试..." << endl;
+                                std::this_thread::sleep_for(std::chrono::milliseconds(300));
+                            }
+                            else
+                            {
+                                cout << endl;
+                            }
+                        }
+                    }
+                    if (!saved)
+                    {
+                        bool quitAnyway = false;
+                        while (true)
+                        {
+                            cout << "多次保存失败！T=放弃未保存的修改并退出  F=返回主菜单继续编辑" << endl << ">";
+                            string choice;
+                            std::getline(cin, choice);
+                            if (choice == "T" || choice == "t" || choice == "y" || choice == "Y")
+                            {
+                                quitAnyway = true;
+                                break;
+                            }
+                            if (choice == "F" || choice == "f" || choice == "n" || choice == "N")
+                                break;
+                            cout << "无效输入，请输入 T 或 F" << endl;
+                        }
+                        if (!quitAnyway)
+                        {
+                            cout << "已返回主菜单（请检查磁盘空间/目录权限后重试保存）" << endl;
+                            operation = -1;
+                            break;
+                        }
+                    }
+                    stopLogger();
+                    if (saved)
+                        cout << Data.size() << " 条数据已写入 " << currentRepoName << ".stxt" << endl;
+                    else
+                        cout << "已放弃保存，程序退出（本次修改可能丢失）" << endl;
+                }
+                return 0;
             default:
                 operation = -1;
                 break;

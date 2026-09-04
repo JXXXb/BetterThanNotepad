@@ -53,6 +53,8 @@ The Visual Studio solution (`BetterThanNotepad.sln`) can also be used.
 
 - Runtime library: `/MD` (`MultiThreadedDLL`)
 - Optimization: `/O2` (Release only)
+- Language standard: C++23 (`CMAKE_CXX_STANDARD 23`; MSVC 由 `/std:c++latest` 提供，
+  GCC/Clang 分支使用 `-std=c++23`)
 - UAC: only main.exe embeds the `requireAdministrator` manifest
   (`main_manifest.rc`); logger.exe inherits elevation from main.exe.
 
@@ -64,8 +66,8 @@ into both executables:
 ```bat
 rc /nologo /fo main.res main_manifest.rc
 rc /nologo /fo logger.res main_manifest.rc
-cl /nologo /W3 /O2 /EHsc /utf-8 /MT /DWIN32 /DNDEBUG /D_CONSOLE /DUNICODE /D_UNICODE main.cpp main.res /Fe:main.exe /link /SUBSYSTEM:CONSOLE /MANIFEST:NO
-cl /nologo /W3 /O2 /EHsc /utf-8 /MT /DWIN32 /DNDEBUG /D_CONSOLE /DUNICODE /D_UNICODE logger.cpp logger.res /Fe:logger.exe /link /SUBSYSTEM:CONSOLE /MANIFEST:NO
+cl /nologo /W3 /O2 /EHsc /utf-8 /std:c++latest /MT /DWIN32 /DNDEBUG /D_CONSOLE /DUNICODE /D_UNICODE main.cpp main.res /Fe:main.exe /link /SUBSYSTEM:CONSOLE /MANIFEST:NO advapi32.lib shell32.lib
+cl /nologo /W3 /O2 /EHsc /utf-8 /std:c++latest /MT /DWIN32 /DNDEBUG /D_CONSOLE /DUNICODE /D_UNICODE logger.cpp logger.res /Fe:logger.exe /link /SUBSYSTEM:CONSOLE /MANIFEST:NO advapi32.lib shell32.lib
 ```
 
 - Runtime library: `/MT` (static CRT)
@@ -220,7 +222,7 @@ Transient / diagnostic files:
 
 ## Tech Stack
 
-- C++11 Standard Library
+- C++23 Standard Library
 - File streams (fstream)
 - Standard containers (vector, string)
 - Multithreading (thread, mutex, atomic, chrono)

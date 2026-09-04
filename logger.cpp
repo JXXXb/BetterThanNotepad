@@ -65,7 +65,7 @@ void processOpQueue(ofstream &log)
     if (!proc.is_open()) return;
 
     string line;
-    while (getline(proc, line))
+    while (std::getline(proc, line))
     {
         if (!line.empty())
             logMsg(log, "[MAIN] " + line);
@@ -183,7 +183,7 @@ int main(int argc, char* argv[])
                 if (crash.is_open())
                 {
                     string line;
-                    while (getline(stateFile, line))
+                    while (std::getline(stateFile, line))
                         crash << line << endl;
                     crash.close();
                     logMsg(logFile, "[LOGGER] Crash recovery saved to " + CRASH_FILE);
