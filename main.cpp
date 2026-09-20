@@ -1,4 +1,4 @@
-#include<iostream>
+﻿#include<iostream>
 #include<fstream>
 #include<string>
 #include<vector>
@@ -13,6 +13,8 @@
 #include<limits>
 #include<filesystem>
 #include<iomanip>
+#include<charconv>
+#include<cctype>
 
 #ifdef _MSC_VER
 #pragma execution_character_set("utf-8")
@@ -33,6 +35,13 @@ using std::ifstream;
 namespace fs = std::filesystem;
 
 vector<string> Data;
+
+struct mwnum
+{
+    long long num;
+    long long index;
+};
+
 
 // === 看门狗/ 崩溃恢复系统（必须在函数定义之前）===
 std::mutex dataMutex;
@@ -188,6 +197,13 @@ bool saveRepo()
 // === 统计当前存储库信息（主菜单 10，新功能）===
 void showStats()
 {
+    long long datanumsum = 0;
+    mwnum datanummax{};
+    mwnum datanummin{};
+    size_t numberCount = 0;
+    size_t invalidNumberCount = 0;
+    bool hasNumber = false;
+    bool sumOverflow = false;
     std::lock_guard<std::mutex> lock(dataMutex);
     if (Data.empty())
     {
@@ -209,6 +225,72 @@ void showStats()
     cout << std::fixed << std::setprecision(1) << "平均每条字符数: " << avg << std::setprecision(0) << endl;
     cout << "最长条目: 索引 " << longest  << " (" << Data[longest].size()  << " 字符) " << Data[longest]  << endl;
     cout << "最短条目: 索引 " << shortest << " (" << Data[shortest].size() << " 字符) " << Data[shortest] << endl;
+
+    // 提取每条数据中的有符号十进制整数。超出 long long 范围的数字会被跳过，
+    // 以免统计功能因一条用户输入而抛出异常或发生未定义行为。
+    for (size_t i = 0; i < Data.size(); i++)
+    {
+        const std::string& str = Data[i];
+        for (size_t j = 0; j < str.size(); )
+        {
+            const bool negative = str[j] == '-' && j + 1 < str.size()
+                && std::isdigit(static_cast<unsigned char>(str[j + 1]));
+            if (!negative && !std::isdigit(static_cast<unsigned char>(str[j])))
+            {
+                ++j;
+                continue;
+            }
+
+            const size_t begin = j;
+            if (negative) ++j;
+            while (j < str.size() && std::isdigit(static_cast<unsigned char>(str[j])))
+                ++j;
+
+            long long value = 0;
+            const char* first = str.data() + begin;
+            const char* last = str.data() + j;
+            const auto [ptr, ec] = std::from_chars(first, last, value);
+            if (ec != std::errc() || ptr != last)
+            {
+                ++invalidNumberCount;
+                continue;
+            }
+
+            if (!hasNumber || value > datanummax.num)
+                datanummax = { value, static_cast<long long>(i) };
+            if (!hasNumber || value < datanummin.num)
+                datanummin = { value, static_cast<long long>(i) };
+            hasNumber = true;
+            ++numberCount;
+
+            if ((value > 0 && datanumsum > std::numeric_limits<long long>::max() - value)
+                || (value < 0 && datanumsum < std::numeric_limits<long long>::min() - value))
+                sumOverflow = true;
+            else if (!sumOverflow)
+                datanumsum += value;
+        }
+    }
+
+    if (!hasNumber)
+    {
+        cout << "未找到可统计的 long long 范围内数字" << endl;
+        return;
+    }
+    if (sumOverflow)
+        cout << "数字总和超出 long long 范围，无法计算总和和平均值" << endl;
+    else
+    {
+        cout << "数字总和为 " << datanumsum << endl;
+        cout << std::fixed << std::setprecision(1)
+             << "数字平均值为 " << static_cast<double>(datanumsum) / numberCount
+             << std::setprecision(0) << endl;
+    }
+    cout << "数字最大值为 " << datanummax.num << "，索引为 " << datanummax.index
+         << "，条目为 " << Data[datanummax.index] << endl;
+    cout << "数字最小值为 " << datanummin.num << "，索引为 " << datanummin.index
+         << "，条目为 " << Data[datanummin.index] << endl;
+    if (invalidNumberCount != 0)
+        cout << "已跳过 " << invalidNumberCount << " 个超出 long long 范围的数字" << endl;
 }
 
 bool autoSaveFunc()
@@ -279,7 +361,9 @@ bool write()
     if(currentRepoName.empty())
         return false;
 
-    std::ofstream out(currentRepoName + ".stxt");
+    const string target = currentRepoName + ".stxt";
+    const string temporary = target + ".tmp";
+    std::ofstream out(temporary, ios::trunc);
     if(!out.is_open())
     {
         return false;
@@ -289,6 +373,16 @@ bool write()
         out << i << "@~" << Data[i] << endl;
     }
     out.close();
+    if (!out.good())
+    {
+        DeleteFileA(temporary.c_str());
+        return false;
+    }
+    if (!MoveFileExA(temporary.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    {
+        DeleteFileA(temporary.c_str());
+        return false;
+    }
     return true;
 }
 
@@ -413,13 +507,28 @@ bool saveState()
 {
     if (currentRepoName.empty()) return false;
     std::lock_guard<std::mutex> lock(dataMutex);
-    ofstream state(STATE_FILE);
+    const string temporary = STATE_FILE + ".new";
+    ofstream state(temporary, ios::trunc);
     if (!state.is_open()) return false;
     state << currentRepoName << endl;
     for (const auto& item : Data)
         state << item << endl;
     state.close();
-    return state.good();
+    if (!state.good())
+    {
+        DeleteFileA(temporary.c_str());
+        return false;
+    }
+    if (!MoveFileExA(temporary.c_str(), STATE_FILE.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+    {
+        DeleteFileA(temporary.c_str());
+        return false;
+    }
+
+    // 状态文件一旦成功落盘即标记为“尚未正常退出”。这样即使用户在 logger
+    // 的轮询周期内立刻重启，也不会错过恢复信号；正常退出时 stopLogger 会删除它。
+    ofstream marker(MAINERROR_FILE, ios::trunc);
+    return marker.is_open();
 }
 
 bool deleteState()
@@ -499,8 +608,10 @@ bool startLoggerProcess()
     }
 
     // DETACHED_PROCESS: logger 不属于本控制台，Ctrl+C/关窗口不会杀死它
+    // 继承 main 的当前工作目录。main 和 logger 都使用相对路径访问
+    // 状态、队列和日志文件，不能把 logger 的工作目录改成 exe 所在目录。
     if (!CreateProcessW(loggerPath.c_str(), cmdBuf.data(), NULL, NULL, FALSE,
-                        DETACHED_PROCESS, NULL, dir.c_str(), &si, &pi))
+                        DETACHED_PROCESS, NULL, NULL, &si, &pi))
     {
         DWORD err = GetLastError();
 
@@ -584,21 +695,8 @@ bool checkAndRecoverCrash()
         return false;
     mainerrorFile.close();
 
-    // 先删除崩溃标记文件
-    DeleteFileA(MAINERROR_FILE.c_str());
-
     cout << "检测到上次异常退出（.mainerror）。" << endl;
 
-    // 检查日志文件是否存在
-    ifstream logFile("logger.log");
-    if (!logFile.is_open())
-    {
-        cout << "未找到日志文件，无法恢复数据。" << endl;
-        return false;
-    }
-    logFile.close();
-
-    // 日志存在 → 从状态文件恢复内容
     cout << "正在从状态文件恢复数据..." << endl;
 
     ifstream stateFile(STATE_FILE);
@@ -824,12 +922,13 @@ int main()
     operation = -1;
     tmpaddcin = "";
 
+    cout << "选择操作:1.增加项, 2.删除项, 3.修改项, 4.查找项, 5.模糊查找, 6.读取存储库, 7.新建存储库, 8.列出所有项, 9.列出存储库, 10.统计信息, 0.退出," << endl;
     while(true)
     {
         switch(operation)
         {
             case -1:
-                cout << "选择操作:1.增加项, 2.删除项, 3.修改项, 4.查找项, 5.模糊查找, 6.读取存储库, 7.新建存储库, 8.列出所有项, 9.列出存储库, 10.统计信息, 0.退出," << endl << ">";
+                cout << ">";
                 if (!(cin >> operation))
                 {
                     cin.clear();
