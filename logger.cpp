@@ -4,6 +4,8 @@
 #include <thread>
 #include <ctime>
 #include <string>
+#include <limits>
+#include <exception>
 #define NOMINMAX
 #define _CRT_SECURE_NO_WARNINGS
 #include <windows.h>
@@ -89,7 +91,18 @@ int main(int argc, char* argv[])
     // 从命令行获取 main.exe 的 PID
     DWORD mainPid = 0;
     if (argc >= 2)
-        mainPid = stoul(argv[1]);
+    {
+        try
+        {
+            unsigned long parsedPid = stoul(argv[1]);
+            if (parsedPid <= std::numeric_limits<DWORD>::max())
+                mainPid = static_cast<DWORD>(parsedPid);
+        }
+        catch (const std::exception&)
+        {
+            mainPid = 0;
+        }
+    }
 
     if (mainPid == 0)
     {
