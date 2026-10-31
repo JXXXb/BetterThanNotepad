@@ -16,7 +16,7 @@ RepoManager is a Windows command-line data manager backed by `std::vector<string
 
 - `main.cpp` - Interactive program, persistence, recovery, and watchdog management
 - `logger.cpp` - Watchdog and operation logger
-- `main_manifest.rc` - UAC manifest resource for `main.exe`
+- `main_manifest.rc` - UAC manifest resource (embedded into `main.exe` by CMake; embedded into both executables by the GitHub Actions release)
 - `CMakeLists.txt` - CMake build configuration
 - `build.bat` - One-command MSVC and Ninja build helper
 
@@ -80,16 +80,16 @@ Repository files are plain text, with one entry per line:
 
 ## Crash recovery
 
-After a repository is selected, `main.exe` saves a state snapshot to `.repo_state.tmp` and creates `.mainerror` to indicate that the process has not exited normally. Both state and repository files are written through temporary files and atomically replaced, so a crash cannot truncate the previous complete snapshot.
+After a repository is selected, `main.exe` creates `.mainerror` as the abnormal-exit marker and writes a state snapshot to `.repo_state.tmp`. The repository and state files are written through temporary files and atomically replaced, so a crash cannot truncate the previous complete snapshot. The marker is created before the snapshot is committed, so a crash cannot leave a snapshot behind without the marker; a marker left behind without a usable snapshot is removed on the next launch without retrying every time.
 
-On a normal exit, `main.exe` saves the repository, deletes `.repo_state.tmp` and `.mainerror`, then stops `logger.exe`. After an abnormal exit, the marker and last complete snapshot remain. The next `main.exe` launch restores the snapshot before displaying the main menu. `logger.exe` also records the event and copies the snapshot to `crash_recovery.txt`.
+On a normal exit, `main.exe` saves the repository, deletes `.repo_state.tmp`, stops `logger.exe`, then deletes `.mainerror`. After an abnormal exit, the marker and last complete snapshot remain. The next `main.exe` launch restores the snapshot before displaying the main menu. `logger.exe` also records the event and copies the snapshot to `crash_recovery.txt` (it does not write `.mainerror` itself; that file is owned by `main.exe`).
 
 Recovery does not depend on the logger polling interval, so it also works when the program is relaunched immediately after a crash.
 
 | File | Purpose |
 | --- | --- |
 | `.repo_state.tmp` | Current repository name followed by in-memory entries |
-| `.mainerror` | Marker that the previous run did not exit normally |
+| `.mainerror` | Marker written by `main.exe` before each snapshot commit; left behind after an abnormal exit and removed on normal exit |
 | `crash_recovery.txt` | Backup made by `logger.exe` after it observes a crash |
 | `logger.log` | Logger startup, heartbeat, crash, and operation records |
 | `.opqueue.tmp` | Operation queue written by `main.exe` |

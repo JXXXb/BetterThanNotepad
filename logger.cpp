@@ -21,7 +21,7 @@ const string CRASH_FILE   = "crash_recovery.txt";
 const string LOG_FILE     = "logger.log";
 const string OPQ_FILE     = ".opqueue.tmp";      // main.exe 写入的操作队列
 const string OPQ_PROC     = ".opqueue.proc";     // 处理中的队列副本
-const string MAINERROR_FILE = ".mainerror";      // 崩溃标记（供 main.exe 下次启动时触发恢复）
+const string MAINERROR_FILE = ".mainerror";      // 崩溃标记（由 main.exe 维护，logger 只读取用于判断崩溃阶段）
 
 // 格式化为 "YYYY-MM-DD HH:MM:SS"(MSVC 下使用安全的 localtime_s)
 void formatNow(char *buf, size_t size)
@@ -174,23 +174,13 @@ int main(int argc, char* argv[])
                 logMsg(logFile, string("[LOGGER] Main process exited (exit code unknown, GetExitCodeProcess failed code=") + to_string(err) + ")");
             }
 
-            // 检查状态文件 → 存在说明是崩溃
+            // 检查状态文件 → 存在说明是崩溃。.mainerror 由 main.exe 负责维护
+            // （保存状态时写入、正常退出时删除），logger 不重复创建，只记录事件
+            // 并把最近一次完整快照备份到 crash_recovery.txt。
             ifstream stateFile(STATE_FILE);
             if (stateFile.is_open())
             {
                 logMsg(logFile, "[LOGGER] CRASH DETECTED! State file found, saving recovery...");
-
-                // 创建崩溃标记 .mainerror，供 main.exe 下次启动时触发自动恢复
-                ofstream marker(MAINERROR_FILE);
-                if (marker.is_open())
-                {
-                    marker.close();
-                    logMsg(logFile, "[LOGGER] Crash marker " + MAINERROR_FILE + " created");
-                }
-                else
-                {
-                    logMsg(logFile, "[LOGGER] ERROR: Cannot create " + MAINERROR_FILE + " marker");
-                }
 
                 ofstream crash(CRASH_FILE);
                 if (crash.is_open())
@@ -209,7 +199,17 @@ int main(int argc, char* argv[])
             }
             else
             {
-                logMsg(logFile, "[LOGGER] Normal exit (no state file). No recovery needed.");
+                // 没有快照：可能正常退出，也可能 main 在提交快照前就崩溃了。
+                ifstream marker(MAINERROR_FILE);
+                if (marker.is_open())
+                {
+                    marker.close();
+                    logMsg(logFile, "[LOGGER] Main process exited abnormally before a state snapshot was committed. Nothing to recover.");
+                }
+                else
+                {
+                    logMsg(logFile, "[LOGGER] Normal exit (no state file). No recovery needed.");
+                }
             }
 
             break;

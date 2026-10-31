@@ -35,6 +35,9 @@ Win32/
 *.log
 *.tmp
 *.proc
+*.txt
+.mainerror
+
 
 # === 崩溃恢复 ===
 crash_recovery.txt

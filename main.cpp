@@ -507,9 +507,22 @@ bool saveState()
 {
     if (currentRepoName.empty()) return false;
     std::lock_guard<std::mutex> lock(dataMutex);
+
+    // 先创建/刷新 .mainerror 作为“尚未正常退出”的提交点：只要标记存在，
+    // 下次启动就会尝试用最近一次完整快照恢复；正常退出时 stopLogger 会删除它。
+    // 这样即使进程在“提交快照”的瞬间崩溃，也不会出现“快照有、标记没有”的漏恢复窗口。
+    ofstream marker(MAINERROR_FILE, ios::trunc);
+    if (!marker.is_open())
+        return false;
+    marker.close();
+
     const string temporary = STATE_FILE + ".new";
     ofstream state(temporary, ios::trunc);
-    if (!state.is_open()) return false;
+    if (!state.is_open())
+    {
+        DeleteFileA(temporary.c_str());
+        return false;
+    }
     state << currentRepoName << endl;
     for (const auto& item : Data)
         state << item << endl;
@@ -524,11 +537,7 @@ bool saveState()
         DeleteFileA(temporary.c_str());
         return false;
     }
-
-    // 状态文件一旦成功落盘即标记为“尚未正常退出”。这样即使用户在 logger
-    // 的轮询周期内立刻重启，也不会错过恢复信号；正常退出时 stopLogger 会删除它。
-    ofstream marker(MAINERROR_FILE, ios::trunc);
-    return marker.is_open();
+    return true;
 }
 
 bool deleteState()
@@ -703,6 +712,7 @@ bool checkAndRecoverCrash()
     if (!stateFile.is_open())
     {
         cout << "未找到状态文件，无法恢复数据。" << endl;
+        DeleteFileA(MAINERROR_FILE.c_str());
         return false;
     }
 
@@ -711,6 +721,7 @@ bool checkAndRecoverCrash()
     {
         cout << "状态文件损坏（无存储库名），无法恢复。" << endl;
         stateFile.close();
+        DeleteFileA(MAINERROR_FILE.c_str());
         return false;
     }
 
@@ -998,7 +1009,7 @@ int main()
                     {
                         while(true)
                         {
-                            cout << "是否删除以上匹配项？T=删除 F=取消:";
+                            cout << "是否删除以上匹配项?" << "T确认" << endl;
                             string ans;
                             std::getline(cin, ans);
                             if (ans == "T" || ans == "t" || ans == "y" || ans == "Y")
@@ -1007,12 +1018,11 @@ int main()
                                 cout << "已删除索引 " << hits[0] << " 的项，剩余 " << Data.size() << " 条" << endl;
                                 break;
                             }
-                            if (ans == "F" || ans == "f" || ans == "n" || ans == "N")
+                            else
                             {
                                 cout << "已取消删除" << endl;
                                 break;
                             }
-                            cout << "无效输入，请输入 T 或 F" << endl;
                         }
                     }
                     else
@@ -1048,7 +1058,9 @@ int main()
                 {
                     cin.clear();
                     cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                    cout << "无效的索引" << endl;
+                    // 旧的回退分支条件恒为假（死代码），且会用残留的 idx 越界访问 Data[idx]，
+                    // 空存储库时直接未定义行为。这里直接拒绝非法索引。
+                    cout << "无效的索引，请输入数字" << endl;
                     operation = -1;
                     break;
                 }
