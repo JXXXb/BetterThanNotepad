@@ -1,4 +1,17 @@
 {
     "cmake.cmakePath": "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/CMake/bin/cmake.exe",
-    "cmake.useCMakePresets": "auto"
+    "cmake.useCMakePresets": "auto",
+    "C_Cpp.codeAnalysis.clangTidy.args": [
+    "-Wno-unknown-pragmas",
+    "-Wno-invalid-pp-token"
+    ],
+    "C_Cpp.files.exclude": {
+        "**/build": true
+    },
+    "files.watcherExclude": {
+        "**/build/**": true
+    },
+    "search.exclude": {
+        "**/build": true
+    }
 }
