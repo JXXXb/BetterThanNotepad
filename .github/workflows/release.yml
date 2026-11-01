@@ -140,7 +140,7 @@ jobs:
 
           ### 📦 包含文件
           - \`main.exe\` — 主程序
-          - \`logger.exe\` — 看门狗/日志进程
+          - \`logger.exe\` — logger.exe/日志进程
 
           ### 🛠️ 构建信息
           - 编译器: MSVC (cl.exe / Visual Studio 2022, v143)

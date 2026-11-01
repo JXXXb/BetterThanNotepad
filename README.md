@@ -5,7 +5,8 @@ RepoManager is a Windows command-line data manager backed by `std::vector<string
 ## Features
 
 - Create, load, list, delete, and switch `.stxt` repositories
-- Add, delete, modify, list, substring-search, and fuzzy-search entries
+- Add, delete by index or matching text, modify, and list entries
+- Find the first entry containing a substring
 - Show repository and numeric statistics
 - Auto-save every 20 seconds
 - Write an operation queue that `logger.exe` copies to `logger.log`
@@ -52,21 +53,33 @@ build\bin\Release\main.exe
 
 Keep `logger.exe` in the same directory as `main.exe`. The program starts it automatically.
 
-## Main menu
+## Menus and commands
 
-- `1` - Add entries continuously, enter `exit` to finish
-- `2` - Delete by index or matching text
-- `3` - Modify an entry by index
-- `4` - Find the first substring match
-- `5` - Show all substring matches
-- `6` - Load and switch repository
-- `7` - Create and switch repository
-- `8` - List all entries
-- `9` - List repositories
-- `10` - Show repository and numeric statistics
-- `0` - Save and exit
+When no repository is selected, use the numeric repository menu:
 
-Indexes are zero-based. Repository names are used as entered, with `.stxt` appended automatically.
+- `1` - Load a repository
+- `2` - Create and switch to a repository
+- `3` - List repositories
+- `4` - Delete a repository
+- `0` - Exit
+
+After selecting or creating a repository, enter one of these commands at the prompt:
+
+| Command | Action |
+| --- | --- |
+| `a` | Add entries continuously; enter `exit` to finish |
+| `d` | Delete by zero-based index or matching text; enter `exit` to finish |
+| `m` | Modify an entry by its zero-based index |
+| `f` | Find the first entry containing the supplied text |
+| `r` | Load and switch to a repository |
+| `n` | Create and switch to a repository |
+| `list-data` | List all entries |
+| `list-repos` | List repositories |
+| `stats` | Show repository and numeric statistics |
+| `w` | Write the current repository to disk |
+| `q` | Save and exit |
+
+Commands are entered exactly as shown. When deleting by text, matching entries are displayed for confirmation or selection. Repository names are used as entered, with `.stxt` appended automatically.
 
 ## Storage format
 

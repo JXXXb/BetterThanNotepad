@@ -3,7 +3,6 @@
 #include<string>
 #include<vector>
 #define NOMINMAX
-#define _CRT_SECURE_NO_WARNINGS
 #include<windows.h>
 #include<ctime>
 #include<mutex>
@@ -328,11 +327,11 @@ bool watchLoggerFunc()
             CloseHandle(hLoggerProcess);
             hLoggerProcess = NULL;
 
-            cout << endl <<  "[看门狗] logger.exe 已终止，正在重启..." << endl << "请继续输入：";
+            cout << endl <<  "[logger.exe] logger.exe 已终止，正在重启..." << endl << "请继续输入：";
             if (startLoggerProcess())
-                cout << endl << "[看门狗] logger.exe 已重新启动" << endl << "请继续输入：";
+                cout << endl << "[logger.exe] logger.exe 已重新启动" << endl << "请继续输入：";
             else
-                cout << endl << "[看门狗] logger.exe 重启失败" << endl << "请继续输入：";
+                cout << endl << "[logger.exe] logger.exe 重启失败" << endl << "请继续输入：";
         }
     }
     return true;
@@ -657,7 +656,7 @@ bool startLoggerProcess()
         }
 
         // 控制台也输出简单信息
-        wcout << L"[看门狗] CreateProcessW 启动 logger.exe 失败，GetLastError=" << err << endl;
+        wcout << L"[logger.exe] CreateProcessW 启动 logger.exe 失败，GetLastError=" << err << endl;
         return false;
     }
     hLoggerProcess = pi.hProcess;
@@ -820,86 +819,92 @@ int main()
     //启动时检查崩溃恢复
     bool recovered = checkAndRecoverCrash();
 
-    int operation = -1;//控制指令
+    string operation;//控制指令
     string tmpaddcin = "";//临时存储添加项/修改项
     string str = "";//临时存储查找项
     int idx = 0;//临时存储索引
+    auto readOperation = [&]()
+    {
+        string input;
+        if (!(cin >> input))
+        {
+            cin.clear();
+            cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            cout << "无效输入，请重新输入" << endl;
+            operation.clear();
+            return;
+        }
+        cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+        operation = input;
+    };
 
     //如果已从崩溃恢复，跳过存储库选择
     if (recovered)
     {
-        operation = 0;
+        operation = "0";
         cout << "当前存储库为: " << currentRepoName << endl;
     }
 
-    while(operation != 0)
+    while(operation != "0")
     {
-        switch(operation)
+        if (operation.empty())
         {
-            case -1:
-                cout << "选择操作:1.读取存储库, 2.新建存储库, 3.列出存储库, 4.删除存储库, 0.退出" << endl << ">";
-                if (!(cin >> operation))
-                {
-                    cin.clear();
-                    cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                    cout << "无效输入，请输入数字" << endl;
-                    operation = -1;
-                }
-                else
-                {
-                    cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                }
-                break;
-            case 1:
-                if(loadRepo())
-                {
-                    cout << "读取成功" << endl;
-                    cout << "当前存储库为: " << currentRepoName << endl;
-                    operation = 0;
-                }
-                else
-                {
-                    cout << "读取失败" << endl;
-                    operation = -1;
-                }
-                break; 
-            case 2:
-                if(createRepo())
-                {
-                    cout << "已创建并切换到存储库: " << currentRepoName << endl;
-                    operation = 0;
-                }
-                else
-                {
-                    cout << "新建存储库失败" << endl;
-                    operation = -1;
-                }
-                break;
-            case 3:
-                cout << "存储库列表:" << endl;
-                cout << listRepo() << endl;
-                operation = -1;
-                break;
-            case 4:
+            cout << "选择操作:1.读取存储库, 2.新建存储库, 3.列出存储库, 4.删除存储库, 0.退出" << endl << ">";
+            readOperation();
+        }
+        else if (operation == "1")
+        {
+            if(loadRepo())
             {
-                // 修复：旧逻辑删除失败后卡在 “是否重试” 无限循环，且完成后无法返回菜单。
-                // 现在一次只处理一个名字，完成后总是回到菜单。
-                cout << "请输入要删除的存储库名称（输入 exit 或直接回车返回菜单）:" << endl << ">";
-                string deleteReponame = "";
-                std::getline(cin, deleteReponame);
-                if (deleteReponame.empty() || deleteReponame == "exit")
-                {
-                    cout << "已取消删除" << endl;
-                    operation = -1;
-                    break;
-                }
-                deleteRepo(deleteReponame);   // 内部会打印成功/失败原因
-                operation = -1;
-                break;
+                cout << "读取成功" << endl;
+                cout << "当前存储库为: " << currentRepoName << endl;
+                operation = "0";
             }
-            default:
-                operation = -1;
-                break;
+            else
+            {
+                cout << "读取失败" << endl;
+                operation.clear();
+            }
+        }
+        else if (operation == "2")
+        {
+            if(createRepo())
+            {
+                cout << "已创建并切换到存储库: " << currentRepoName << endl;
+                operation = "0";
+            }
+            else
+            {
+                cout << "新建存储库失败" << endl;
+                operation.clear();
+            }
+        }
+        else if (operation == "3")
+        {
+            cout << "存储库列表:" << endl;
+            cout << listRepo() << endl;
+            operation.clear();
+        }
+        else if (operation == "4")
+        {
+            // 修复：旧逻辑删除失败后卡在 “是否重试” 无限循环，且完成后无法返回菜单。
+            // 现在一次只处理一个名字，完成后总是回到菜单。
+            cout << "请输入要删除的存储库名称（输入 exit 或直接回车返回菜单）:" << endl << ">";
+            string deleteReponame = "";
+            std::getline(cin, deleteReponame);
+            if (deleteReponame.empty() || deleteReponame == "exit")
+            {
+                cout << "已取消删除" << endl;
+            }
+            else
+            {
+                deleteRepo(deleteReponame);   // 内部会打印成功/失败原因
+            }
+            operation.clear();
+        }
+        else
+        {
+            operation.clear();
         }
     }
 
@@ -912,13 +917,13 @@ int main()
     //启动日志进程（看门狗） 
     if (startLoggerProcess())
     {
-        cout << "[看门狗] 日志进程已启动，崩溃保护已激活" << endl;
+        cout << "[logger.exe] 日志进程已启动，崩溃保护已激活" << endl;
         if (!saveState())
-            cout << "[看门狗] 初始状态保存失败" << endl;
+            cout << "[logger.exe] 初始状态保存失败" << endl;
     }
     else
     {
-        cout << "[看门狗] 警告：无法启动日志进程，崩溃保护未激活" << endl;
+        cout << "[logger.exe] 警告：无法启动日志进程，崩溃保护未激活" << endl;
     }
 
     // 启动自动保存（每20秒）
@@ -930,311 +935,271 @@ int main()
     loggerWatchRunning.store(true);
     loggerWatchThread = std::thread(watchLoggerFunc);
 
-    operation = -1;
+    operation.clear();
     tmpaddcin = "";
 
-    cout << "选择操作:1.增加项, 2.删除项, 3.修改项, 4.查找项, 5.模糊查找, 6.读取存储库, 7.新建存储库, 8.列出所有项, 9.列出存储库, 10.统计信息, 0.退出," << endl;
+    string operation_list[11] = {"a", "d", "m", "f", "r", "n", "list-data", "list-repos", "stats", "q", "w"};
+    cout << "选择操作:a.增加项, d.删除项, m.修改项, f.查找项, r.读取存储库, n.新建存储库, list-data.列出所有项, list-repos.列出存储库, stats.统计信息, q.退出, w.写入" << endl;
     while(true)
     {
-        switch(operation)
+        if (operation.empty())
         {
-            case -1:
-                cout << ">";
-                if (!(cin >> operation))
-                {
-                    cin.clear();
-                    cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                    cout << "无效输入，请输入数字" << endl;
-                    operation = -1;
-                }
-                else
-                {
-                    cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                }
-                break;
-            case 1:
-                cout << "连续写入, 输入 exit 结束" << endl;
-                while(true)
-                {
-                    cout << "添加数据:";
-                    std::getline(cin, tmpaddcin);
-                    if(tmpaddcin == "exit")
-                        break;
-                    if(tmpaddcin.empty())
-                    {
-                        cout << "（空行已忽略，输入 exit 结束）" << endl;
-                        continue;
-                    }
-                    if (!add(tmpaddcin))
-                        cout << "添加失败" << endl;
-                }
-                operation = -1;
-                break;
-            case 2:
-                // 修复：旧实现只取首字符当索引（“12”会删第 1 条）、负号/越界会触发
-                // Data.erase(begin()±n) 越界（未定义行为/崩溃），且直接改 Data 绕过了
-                // pop() 的加锁与操作日志。现在：纯数字按完整索引删除；否则按内容
-                // 查找，列出全部匹配后由用户确认，绝不删除未匹配到的项。
-                cout << "连续删除：输入索引或内容，输入 exit 结束" << endl;
-                while(true)
-                {
-                    cout << "删除:";
-                    string input;
-                    std::getline(cin, input);
-                    if(input == "exit")
-                        break;
-                    if(input.empty())
-                        continue;
-
-                    int didx = -1;
-                    if (tryParseInt(input, didx))
-                    {
-                        if (pop(didx))
-                            cout << "已删除索引 " << didx << " 的项，剩余 " << Data.size() << " 条" << endl;
-                        else
-                            cout << "索引 " << didx << " 超出范围（当前共 " << Data.size()
-                                 << " 条，索引 0.." << (Data.empty() ? 0 : (int)Data.size() - 1) << "）" << endl;
-                        continue;
-                    }
-
-                    // 不是合法索引 → 按内容查找，确认后删除
-                    vector<int> hits = fuzzyMatches(input);
-                    if (hits.empty())
-                    {
-                        cout << "未找到包含 \"" << input << "\" 的项，未删除任何数据" << endl;
-                        continue;
-                    }
-                    printMatchList(hits);
-                    if (hits.size() == 1)
-                    {
-                        while(true)
-                        {
-                            cout << "是否删除以上匹配项?" << "T确认" << endl;
-                            string ans;
-                            std::getline(cin, ans);
-                            if (ans == "T" || ans == "t" || ans == "y" || ans == "Y")
-                            {
-                                pop(hits[0]);
-                                cout << "已删除索引 " << hits[0] << " 的项，剩余 " << Data.size() << " 条" << endl;
-                                break;
-                            }
-                            else
-                            {
-                                cout << "已取消删除" << endl;
-                                break;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        while(true)
-                        {
-                            cout << "有多个匹配，输入要删除的匹配序号(1.." << hits.size()
-                                 << ")，或输入 F 取消:";
-                            string ans;
-                            std::getline(cin, ans);
-                            int sel = -1;
-                            if (tryParseInt(ans, sel) && sel >= 1 && sel <= (int)hits.size())
-                            {
-                                int target = hits[sel - 1];
-                                pop(target);
-                                cout << "已删除索引 " << target << " 的项，剩余 " << Data.size() << " 条" << endl;
-                                break;
-                            }
-                            if (ans == "F" || ans == "f" || ans == "n" || ans == "N")
-                            {
-                                cout << "已取消删除" << endl;
-                                break;
-                            }
-                            cout << "无效输入，请输入 1.." << hits.size() << " 或 F" << endl;
-                        }
-                    }
-                }
-                operation = -1;
-                break;
-            case 3:
-                cout << "修改项索引:";
-                if (!(cin >> idx))
-                {
-                    cin.clear();
-                    cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                    // 旧的回退分支条件恒为假（死代码），且会用残留的 idx 越界访问 Data[idx]，
-                    // 空存储库时直接未定义行为。这里直接拒绝非法索引。
-                    cout << "无效的索引，请输入数字" << endl;
-                    operation = -1;
-                    break;
-                }
-                cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                if (idx < 0)
-                {
-                    cout << "索引不能为负数" << endl;
-                    operation = -1;
-                    break;
-                }
-                cout << "新的数据:";
+            cout << ">";
+            getline(cin, operation);
+        }
+        else if (operation == operation_list[0])
+        {
+            cout << "连续写入, 输入 exit 结束" << endl;
+            while(true)
+            {
+                cout << "添加数据:";
                 std::getline(cin, tmpaddcin);
-                if (tmpaddcin.empty())
-                {
-                    cout << "内容为空，未修改" << endl;
-                    operation = -1;
+                if(tmpaddcin == "exit")
                     break;
-                }
-                if(!mod(idx, tmpaddcin))
-                    cout << "修改失败：索引 " << idx << " 超出范围（当前共 " << Data.size() << " 条）" << endl;
-                else
-                    cout << "已修改索引 " << idx << " 的项" << endl;
-                operation = -1;
-                break;
-            case 4:
-                cout << "输入要查找的内容:";
-                std::getline(cin, str);
-                if (str.empty())
+                if(tmpaddcin.empty())
                 {
-                    cout << "内容为空，未查找" << endl;
-                    operation = -1;
+                    continue;
+                }
+                if (!add(tmpaddcin))
+                    cout << "添加失败" << endl;
+            }
+            operation.clear();
+        }
+        else if (operation == operation_list[1])
+        {
+            // 修复：旧实现只取首字符当索引（“12”会删第 1 条）、负号/越界会触发
+            // Data.erase(begin()±n) 越界（未定义行为/崩溃），且直接改 Data 绕过了
+            // pop() 的加锁与操作日志。现在：纯数字按完整索引删除；否则按内容
+            // 查找，列出全部匹配后由用户确认，绝不删除未匹配到的项。
+            cout << "连续删除：输入索引或内容，输入 exit 结束" << endl;
+            while(true)
+            {
+                cout << "删除:";
+                string input;
+                std::getline(cin, input);
+                if(input == "exit")
                     break;
-                }
-                idx = find(str);
-                if(idx != -1)
-                    cout << "索引: " << idx << "  原文: " << Data[idx] << endl;
-                else
-                    cout << "未找到包含 \"" << str << "\" 的项" << endl;
-                operation = -1;
-                break;
-            case 5:
-                cout << "模糊查找（显示所有匹配项），输入要查找的内容:";
-                std::getline(cin, str);
-                if (str.empty())
+                if(input.empty())
+                    continue;
+
+                int didx = -1;
+                if (tryParseInt(input, didx))
                 {
-                    cout << "内容为空，未查找" << endl;
-                    operation = -1;
-                    break;
-                }
-                // 修复：旧 find_fuzzy 只打印第一条匹配；现在展示全部匹配并给出数量。
-                {
-                    vector<int> hits = fuzzyMatches(str);
-                    if (hits.empty())
-                        cout << "未找到包含 \"" << str << "\" 的项" << endl;
+                    if (pop(didx))
+                        cout << "已删除索引 " << didx << " 的项，剩余 " << Data.size() << " 条" << endl;
                     else
+                        cout << "索引 " << didx << " 超出范围（当前共 " << Data.size()
+                             << " 条，索引 0.." << (Data.empty() ? 0 : (int)Data.size() - 1) << "）" << endl;
+                    continue;
+                }
+
+                // 不是合法索引 → 按内容查找，确认后删除
+                vector<int> hits = fuzzyMatches(input);
+                if (hits.empty())
+                {
+                    cout << "未找到包含 \"" << input << "\" 的项，未删除任何数据" << endl;
+                    continue;
+                }
+                printMatchList(hits);
+                if (hits.size() == 1)
+                {
+                    while(true)
                     {
-                        cout << "共找到 " << hits.size() << " 条匹配:" << endl;
-                        printMatchList(hits);
-                    }
-                }
-                operation = -1;
-                break;
-            case 6:
-                if (!saveRepo())
-                {
-                    cout << "当前存储库写入失败，无法读取" << endl;
-                    operation = -1;
-                    break;
-                }
-                if(loadRepo())
-                {
-                    cout << "读取成功" << endl;
-                    cout << "当前存储库为: " << currentRepoName << endl;
-                    if (!saveState())
-                        cout << "存储库已读取，但状态或日志记录失败" << endl;
-                    operation = -1;
-                }
-                else
-                {
-                    cout << "读取失败" << endl;
-                    cout << "当前存储库为: " << currentRepoName << endl;
-                    operation = -1;
-                }
-                break;
-            case 7:
-                if (!saveRepo())
-                {
-                    cout << "当前存储库写入失败，无法新建" << endl;
-                    operation = -1;
-                    break;
-                }
-                if(createRepo())
-                {
-                    cout << "已创建并切换到存储库: " << currentRepoName << endl;
-                    if (!saveState())
-                        cout << "存储库已创建，但状态或日志记录失败" << endl;
-                }
-                else
-                {
-                    cout << "新建存储库失败" << endl;
-                }
-                operation = -1;
-                break;
-            case 8:
-                listItems();
-                operation = -1;
-                break;
-            case 9:
-                cout << "存储库列表:" << endl;
-                cout << listRepo() << endl;
-                operation = -1;
-                break;
-            case 10:
-                showStats();
-                operation = -1;
-                break;
-            case 0:
-                // 退出：先保存，再停止看门狗。
-                // 修复：旧实现 while(true) 中保存失败会无限 “正在重写” 死循环；
-                // 现在失败 3 次后由用户明确选择（重试 / 放弃退出 / 返回菜单）。
-                logOp("EXIT", "saving " + to_string(Data.size()) + " items to " + currentRepoName);
-                {
-                    bool saved = false;
-                    for (int attempt = 1; attempt <= 3 && !saved; attempt++)
-                    {
-                        saved = saveRepo();
-                        if (!saved)
+                        cout << "是否删除以上匹配项?" << "T确认" << endl;
+                        string ans;
+                        std::getline(cin, ans);
+                        if (ans == "T" || ans == "t" || ans == "y" || ans == "Y")
                         {
-                            cout << "第 " << attempt << " 次保存 " << currentRepoName << ".stxt 失败";
-                            if (attempt < 3)
-                            {
-                                cout << "，稍后自动重试..." << endl;
-                                std::this_thread::sleep_for(std::chrono::milliseconds(300));
-                            }
-                            else
-                            {
-                                cout << endl;
-                            }
+                            pop(hits[0]);
+                            cout << "已删除索引 " << hits[0] << " 的项，剩余 " << Data.size() << " 条" << endl;
+                            break;
                         }
-                    }
-                    if (!saved)
-                    {
-                        bool quitAnyway = false;
-                        while (true)
+                        else
                         {
-                            cout << "多次保存失败！T=放弃未保存的修改并退出  F=返回主菜单继续编辑" << endl << ">";
-                            string choice;
-                            std::getline(cin, choice);
-                            if (choice == "T" || choice == "t" || choice == "y" || choice == "Y")
-                            {
-                                quitAnyway = true;
-                                break;
-                            }
-                            if (choice == "F" || choice == "f" || choice == "n" || choice == "N")
-                                break;
-                            cout << "无效输入，请输入 T 或 F" << endl;
-                        }
-                        if (!quitAnyway)
-                        {
-                            cout << "已返回主菜单（请检查磁盘空间/目录权限后重试保存）" << endl;
-                            operation = -1;
+                            cout << "已取消删除" << endl;
                             break;
                         }
                     }
-                    stopLogger();
-                    if (saved)
-                        cout << Data.size() << " 条数据已写入 " << currentRepoName << ".stxt" << endl;
-                    else
-                        cout << "已放弃保存，程序退出（本次修改可能丢失）" << endl;
                 }
+                else
+                {
+                    while(true)
+                    {
+                        cout << "有多个匹配，输入要删除的匹配序号(1.." << hits.size()
+                             << ")，或输入 F 取消:";
+                        string ans;
+                        std::getline(cin, ans);
+                        int sel = -1;
+                        if (tryParseInt(ans, sel) && sel >= 1 && sel <= (int)hits.size())
+                        {
+                            int target = hits[sel - 1];
+                            pop(target);
+                            cout << "已删除索引 " << target << " 的项，剩余 " << Data.size() << " 条" << endl;
+                            break;
+                        }
+                        if (ans == "F" || ans == "f" || ans == "n" || ans == "N")
+                        {
+                            cout << "已取消删除" << endl;
+                            break;
+                        }
+                        cout << "无效输入，请输入 1.." << hits.size() << " 或 F" << endl;
+                    }
+                }
+            }
+            operation.clear();
+        }
+        else if (operation == operation_list[2])
+        {
+            cout << "修改项索引:";
+            if (!(cin >> idx))
+            {
+                cin.clear();
+                cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                // 旧的回退分支条件恒为假（死代码），且会用残留的 idx 越界访问 Data[idx]，
+                // 空存储库时直接未定义行为。这里直接拒绝非法索引。
+                cout << "无效的索引，请输入数字" << endl;
+                operation.clear();
+                continue;
+            }
+            cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+            if (idx < 0)
+            {
+                cout << "索引不能为负数" << endl;
+                operation.clear();
+                continue;
+            }
+            cout << "新的数据:";
+            std::getline(cin, tmpaddcin);
+            if (tmpaddcin.empty())
+            {
+                cout << "内容为空，未修改" << endl;
+                operation.clear();
+                continue;
+            }
+            if(!mod(idx, tmpaddcin))
+                cout << "修改失败：索引 " << idx << " 超出范围（当前共 " << Data.size() << " 条）" << endl;
+            else
+                cout << "已修改索引 " << idx << " 的项" << endl;
+            operation.clear();
+        }
+        else if (operation == operation_list[3])
+        {
+            cout << "输入要查找的内容:";
+            std::getline(cin, str);
+            if (str.empty())
+            {
+                cout << "内容为空，未查找" << endl;
+                operation.clear();
+                continue;
+            }
+            idx = find(str);
+            if(idx != -1)
+                cout << "索引: " << idx << "  原文: " << Data[idx] << endl;
+            else
+                cout << "未找到包含 \"" << str << "\" 的项" << endl;
+            operation.clear();
+        }
+        else if (operation == operation_list[4])
+        {
+            if (!saveRepo())
+            {
+                cout << "当前存储库写入失败，无法读取" << endl;
+                operation.clear();
+                continue;
+            }
+            if(loadRepo())
+            {
+                cout << "读取成功" << endl;
+                cout << "当前存储库为: " << currentRepoName << endl;
+                if (!saveState())
+                    cout << "存储库已读取，但状态或日志记录失败" << endl;
+                operation.clear();
+            }
+            else
+            {
+                cout << "读取失败" << endl;
+                cout << "当前存储库为: " << currentRepoName << endl;
+                operation.clear();
+            }
+        }
+        else if (operation == operation_list[5])
+        {
+            if (!saveRepo())
+            {
+                cout << "当前存储库写入失败，无法新建" << endl;
+                operation.clear();
+                continue;
+            }
+            if(createRepo())
+            {
+                cout << "已创建并切换到存储库: " << currentRepoName << endl;
+                if (!saveState())
+                    cout << "存储库已创建，但状态或日志记录失败" << endl;
+            }
+            else
+            {
+                cout << "新建存储库失败" << endl;
+            }
+            operation.clear();
+        }
+        else if (operation == operation_list[6])
+        {
+            listItems();
+            operation.clear();
+        }
+        else if (operation == operation_list[7])
+        {
+            cout << "存储库列表:" << endl;
+            cout << listRepo() << endl;
+            operation.clear();
+        }
+        else if (operation == operation_list[8])
+        {
+            showStats();
+            operation.clear();
+        }
+        if(operation == operation_list[9])
+        {
+            if(saveRepo())
+            {
+                cout << Data.size() << "条     " << sizeof(Data) <<" 字节已写入   " << endl;
+                logOp("EXIT", "saving " + to_string(Data.size()) + " items to " + currentRepoName);
+                stopLogger();
+                cout << "[logger.exe]已停止" << endl << "[自动保存]已停止";
                 return 0;
-            default:
-                operation = -1;
-                break;
+            }
+            else
+            {
+                cout << "失败，是否重试(T确认)" << endl;
+                char tryagain = 'F';
+                if(tryagain == 'T' && tryagain == 't' && tryagain == 'y' && tryagain == 'Y')
+                {
+                    operation = operation_list[9];
+                    break;
+                }
+            }
+        }
+        if(operation == operation_list[10])
+        {
+            if(saveRepo())
+            {
+                cout << Data.size() << "条     " << sizeof(Data) <<" 字节已写入   " << endl;
+            }
+            else
+            {
+                cout << "失败，是否重试(T确认)" << endl;
+                char tryagain = 'F';
+                if(tryagain == 'T' && tryagain == 't' && tryagain == 'y' && tryagain == 'Y')
+                {
+                    operation = operation_list[10];
+                    break;
+                }
+            }
+        }
+        else
+        {
+            cout << "无效输入，请重新选择菜单操作" << endl;
+            operation.clear();
         }
     }
 }
