@@ -71,13 +71,20 @@ After selecting or creating a repository, enter one of these commands at the pro
 | `d` | Delete by zero-based index or matching text; enter `exit` to finish |
 | `m` | Modify an entry by its zero-based index |
 | `f` | Find the first entry containing the supplied text |
-| `r` | Load and switch to a repository |
-| `n` | Create and switch to a repository |
+| `r` | Open the repository operations menu |
 | `list-data` | List all entries |
-| `list-repos` | List repositories |
 | `stats` | Show repository and numeric statistics |
 | `w` | Write the current repository to disk |
 | `q` | Save and exit |
+
+The `r` command opens a submenu:
+
+| Subcommand | Action |
+| --- | --- |
+| `r` | Load and switch to a repository |
+| `n` | Create and switch to a repository |
+| `l` | List repositories |
+| `exit` | Return to the main command prompt |
 
 Commands are entered exactly as shown. When deleting by text, matching entries are displayed for confirmation or selection. Repository names are used as entered, with `.stxt` appended automatically.
 

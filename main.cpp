@@ -400,14 +400,17 @@ string listRepo()
     HANDLE hFind = FindFirstFileA("*.stxt", &findData);
     if (hFind == INVALID_HANDLE_VALUE)
         return repoList;
+
     do
     {
-        if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-            continue;
-        if (!repoList.empty())
-            repoList += "\n";
-        repoList += string(findData.cFileName);
+        if (!(findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+        {
+            if (!repoList.empty())
+                repoList += "\n";
+            repoList += findData.cFileName;
+        }
     } while (FindNextFileA(hFind, &findData));
+
     FindClose(hFind);
     return repoList;
 }
@@ -938,8 +941,8 @@ int main()
     operation.clear();
     tmpaddcin = "";
 
-    string operation_list[11] = {"a", "d", "m", "f", "r", "n", "list-data", "list-repos", "stats", "q", "w"};
-    cout << "选择操作:a.增加项, d.删除项, m.修改项, f.查找项, r.读取存储库, n.新建存储库, list-data.列出所有项, list-repos.列出存储库, stats.统计信息, q.退出, w.写入" << endl;
+    string operation_list[9] = {"a", "d", "m", "f", "r", "list-data", "stats", "q", "w"};
+    cout << "选择操作:a.增加项, d.删除项, m.修改项, f.查找项, r.存储库操作, list-data.列出所有项, stats.统计信息, q.退出, w.写入" << endl;
     while(true)
     {
         if (operation.empty())
@@ -947,6 +950,8 @@ int main()
             cout << ">";
             getline(cin, operation);
         }
+
+        //a.增加项
         else if (operation == operation_list[0])
         {
             cout << "连续写入, 输入 exit 结束" << endl;
@@ -965,6 +970,8 @@ int main()
             }
             operation.clear();
         }
+
+        //d.删除项
         else if (operation == operation_list[1])
         {
             // 修复：旧实现只取首字符当索引（“12”会删第 1 条）、负号/越界会触发
@@ -1048,6 +1055,8 @@ int main()
             }
             operation.clear();
         }
+
+        //m.修改项
         else if (operation == operation_list[2])
         {
             cout << "修改项索引:";
@@ -1082,6 +1091,8 @@ int main()
                 cout << "已修改索引 " << idx << " 的项" << endl;
             operation.clear();
         }
+
+        //f.查找项
         else if (operation == operation_list[3])
         {
             cout << "输入要查找的内容:";
@@ -1099,66 +1110,115 @@ int main()
                 cout << "未找到包含 \"" << str << "\" 的项" << endl;
             operation.clear();
         }
+
+        //r.存储库操作
         else if (operation == operation_list[4])
         {
-            if (!saveRepo())
+            string roperation = "";
+            string roperation_list[4] = {"r", "n", "l", "exit"};
+            cout << "r.读取存储库, n.新建存储库, l.列表, exit.返回" << endl;
+            while(true)
             {
-                cout << "当前存储库写入失败，无法读取" << endl;
-                operation.clear();
-                continue;
-            }
-            if(loadRepo())
-            {
-                cout << "读取成功" << endl;
-                cout << "当前存储库为: " << currentRepoName << endl;
-                if (!saveState())
-                    cout << "存储库已读取，但状态或日志记录失败" << endl;
-                operation.clear();
-            }
-            else
-            {
-                cout << "读取失败" << endl;
-                cout << "当前存储库为: " << currentRepoName << endl;
-                operation.clear();
+                if(roperation.empty())
+                {
+                    cout << ">";
+                    std::getline(cin, roperation);
+                    cout << endl;
+                }
+
+                else if(roperation == roperation_list[0])
+                {
+                    if (!saveRepo())
+                    {
+                        cout << "当前存储库写入失败，无法读取" << endl;
+                        roperation.clear();
+                        continue;
+                    }
+                    if(loadRepo())
+                    {
+                        cout << "读取成功" << endl;
+                        cout << "当前存储库为: " << currentRepoName << endl;
+                        if (!saveState())
+                            cout << "存储库已读取，但状态或日志记录失败" << endl;
+                        roperation.clear();
+                        continue;
+                    }
+                    else
+                    {
+                        cout << "读取失败" << endl;
+                        cout << "当前存储库为: " << currentRepoName << endl;
+                        roperation.clear();
+                        continue;
+                    }
+                }
+
+                else if(roperation == roperation_list[1])
+                {
+                    if (!saveRepo())
+                    {
+                        cout << "当前存储库写入失败,是否继续(T确认)" << endl;
+                        string ans;
+                        cin >> ans;
+                        if(ans == "T" && ans == "t" && ans == "y" && ans == "Y")
+                        {
+                            if(createRepo())
+                            {
+                                cout << "已创建存储库: " << endl;
+                                cout << "当前存储库为: " << currentRepoName << endl;
+                                if (!saveState())
+                                    cout << "存储库已创建，但状态或日志记录失败" << endl;
+                            }
+                        }
+                        else
+                        {
+                            cout << "已取消新建存储库" << endl;
+                            cout << "当前存储库为: " << currentRepoName << endl;
+                            operation.clear();
+                            continue;
+                        }
+                        cout << "已创建并切换到存储库: " << currentRepoName << endl;
+                        if (!saveState())
+                            cout << "存储库已创建，但状态或日志记录失败" << endl;
+                    }
+                    else
+                    {
+                        cout << "新建存储库失败" << endl;
+                    }
+                    operation.clear();
+                }
+
+                else if(roperation == roperation_list[2])
+                {
+                    cout << "存储库列表:" << endl;
+                    cout << listRepo() << endl;
+                    operation.clear();
+                    continue;
+                }
+
+                else if(roperation == roperation_list[3])
+                {
+                    operation.clear();
+                    break;
+                }
             }
         }
+
+        //list-data.列出所有项
         else if (operation == operation_list[5])
-        {
-            if (!saveRepo())
-            {
-                cout << "当前存储库写入失败，无法新建" << endl;
-                operation.clear();
-                continue;
-            }
-            if(createRepo())
-            {
-                cout << "已创建并切换到存储库: " << currentRepoName << endl;
-                if (!saveState())
-                    cout << "存储库已创建，但状态或日志记录失败" << endl;
-            }
-            else
-            {
-                cout << "新建存储库失败" << endl;
-            }
-            operation.clear();
-        }
-        else if (operation == operation_list[6])
         {
             listItems();
             operation.clear();
         }
-        else if (operation == operation_list[7])
-        {
-            cout << "存储库列表:" << endl;
-            cout << listRepo() << endl;
-            operation.clear();
-        }
-        else if (operation == operation_list[8])
+
+        //stats.统计信息
+        else if (operation == operation_list[6])
         {
             showStats();
             operation.clear();
         }
-        if(operation == operation_list[9])
+
+        //q.退出
+        else if(operation == operation_list[7])
         {
             if(saveRepo())
             {
@@ -1174,16 +1234,21 @@ int main()
                 char tryagain = 'F';
                 if(tryagain == 'T' && tryagain == 't' && tryagain == 'y' && tryagain == 'Y')
                 {
-                    operation = operation_list[9];
-                    break;
+                    operation = operation_list[7];
+                    continue;
                 }
             }
         }
-        if(operation == operation_list[10])
+
+
+        //w.写入
+        else if(operation == operation_list[8])
         {
             if(saveRepo())
             {
                 cout << Data.size() << "条     " << sizeof(Data) <<" 字节已写入   " << endl;
+                operation.clear();
+                continue;
             }
             else
             {
@@ -1191,8 +1256,8 @@ int main()
                 char tryagain = 'F';
                 if(tryagain == 'T' && tryagain == 't' && tryagain == 'y' && tryagain == 'Y')
                 {
-                    operation = operation_list[10];
-                    break;
+                    operation = operation_list[8];
+                    continue;
                 }
             }
         }
