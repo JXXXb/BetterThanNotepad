@@ -1173,7 +1173,7 @@ int main()
                         {
                             cout << "已取消新建存储库" << endl;
                             cout << "当前存储库为: " << currentRepoName << endl;
-                            operation.clear();
+                            roperation.clear();
                             continue;
                         }
                         cout << "已创建并切换到存储库: " << currentRepoName << endl;
@@ -1184,14 +1184,14 @@ int main()
                     {
                         cout << "新建存储库失败" << endl;
                     }
-                    operation.clear();
+                    roperation.clear();
                 }
 
                 else if(roperation == roperation_list[2])
                 {
                     cout << "存储库列表:" << endl;
                     cout << listRepo() << endl;
-                    operation.clear();
+                    roperation.clear();
                     continue;
                 }
 

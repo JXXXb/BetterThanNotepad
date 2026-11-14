@@ -86,6 +86,8 @@ The `r` command opens a submenu:
 | `l` | List repositories |
 | `exit` | Return to the main command prompt |
 
+After loading, creating, or listing a repository, the submenu remains open so you can perform another repository operation. Enter `exit` to return to the main command prompt.
+
 Commands are entered exactly as shown. When deleting by text, matching entries are displayed for confirmation or selection. Repository names are used as entered, with `.stxt` appended automatically.
 
 ## Storage format
